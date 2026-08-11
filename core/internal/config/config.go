@@ -33,6 +33,28 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// KeysDir returns the directory holding Core key material (ADR-0003: outside
+// PostgreSQL). Defaults to ./keys for local development.
+func KeysDir() string {
+	return envOr("CORE_KEYS_DIR", "keys")
+}
+
+// DatabaseDSN returns the PostgreSQL connection string.
+func DatabaseDSN() string {
+	return envOr("CORE_DB_DSN", "postgres://autosecrets:autosecrets@localhost:5432/autosecrets")
+}
+
+// PublicAgentURL returns the public Agent hostname used in Install Commands
+// and the install script. Empty means the install flow is disabled.
+func PublicAgentURL() string {
+	return os.Getenv("CORE_PUBLIC_AGENT_URL")
+}
+
+// ArtifactDir returns the directory holding signed Agent artifacts.
+func ArtifactDir() string {
+	return envOr("CORE_ARTIFACT_DIR", "artifacts")
+}
+
 // FromEnv builds a Config from CORE_* environment variables.
 func FromEnv() (Config, error) {
 	cidrs, err := ParseCIDRs(splitCSV(os.Getenv("CORE_TRUSTED_PROXY_CIDRS")))

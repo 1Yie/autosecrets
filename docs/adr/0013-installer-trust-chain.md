@@ -1,0 +1,3 @@
+# Installer trust chain: Core-hosted signed artifacts with embedded key
+
+Core will serve the install script over TLS from the Agent hostname and the signed Agent artifact and its signature from the same origin. The script embeds the Core signing public key, verifies the downloaded artifact before execution, and receives the Enrollment Token as a separate command argument rather than embedding it in the script. Bare `curl | bash` trusting only HTTPS was rejected because a compromised or cached script would install an unverified binary; signing the script itself was rejected as a second signature without a second trust root; hosting artifacts on GitHub Releases was rejected because it adds an out-of-domain dependency and complicates the pinned-release guarantee.

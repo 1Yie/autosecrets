@@ -295,3 +295,95 @@ explicit rather than implicit.
   their inputs (management API surface, release artifacts) do not exist.
 - The Compose CI job validates configuration only; a full stack smoke test is
   deferred until the Core image and Caddy mTLS path are exercised together.
+
+## Confirmed first vertical slice (grilled decisions)
+
+Recorded after the grilling session that confirmed the first end-to-end
+vertical slice; it supersedes any phase ordering that would build one tier in
+isolation.
+
+### Slice boundary
+
+1. First boot: Core prints a one-time Bootstrap Code to its logs; the browser
+   consumes it to create the first Administrator (no default credential).
+2. Password login and session; TOTP, recovery codes, and Step-up Authentication
+   are deferred (see gaps below).
+3. Authoring path: create Application and Environment, upload opaque Secret
+   bytes, auto-create a default File Binding (filename equals the Secret name,
+   path inside the bundle directory, editable or removable), edit in a Draft,
+   then Publish.
+4. Minimal Node Group (name plus explicit members) and Assignment; overlap
+   conflict rules are deferred.
+5. Install Command:
+   `curl -fsSL https://<agent-host>/install.sh | sudo bash -s -- --server <url> --token <token>`
+   The script embeds the Core signing public key, downloads the signed Agent
+   artifact and signature from the same origin, and verifies before executing.
+   The Agent binary is hosted by Core. See ADR-0013.
+6. Enrollment consumes the ten-minute, single-use Token; the Agent begins ETag
+   polling toward the 30-second discovery target.
+7. Activation writes files only: the Materialized Bundle is staged and switched
+   atomically to `current/`; no service actions in this slice.
+
+### Temporary gaps recorded (not silent deferrals)
+
+- TOTP, recovery codes, and Step-up Authentication are deferred. Until they
+  land, Publish and install-command generation do not require Step-up
+  Authentication; this is a documented temporary weakening of Phase 1/3 exit
+  evidence.
+- Activation performs `none` only. `reload`/`restart` actions and the systemd
+  adapter are deferred to the Materializer slice (Phase 4).
+- Node Group overlap conflict rejection is deferred; a duplicate Assignment
+  fails with a plain error until the ambiguity rules land.
+
+### Confirmed unchanged
+
+- Agent convergence is pull-only over outbound connections; Managed Nodes
+  expose no inbound ports (ADR-0010).
+- Envelope encryption per node and Core signatures on delivery (ADR-0011).
+- Managed Node layout and Materialized Bundle location per the blueprint.
+
+## First vertical slice implementation status
+
+Recorded at the end of the implementation session for
+`.scratch/first-vertical-slice/spec.md`.
+
+### Completed
+
+- Core: PostgreSQL schema and embedded migrations; master key, internal Agent
+  CA, and Ed25519 signing key management outside PostgreSQL (ADR-0003/0006);
+  argon2id password hashing; bootstrap code lifecycle; secure-cookie sessions
+  with double-submit CSRF; append-only Audit Events in the same transaction as
+  security-relevant changes (ADR-0008).
+- Core Secret Control: Applications, Environments, Secrets with encrypted
+  immutable Secret Versions (wrapped per-version data keys), default File
+  Binding (filename equals Secret name, 0400) with path/mode validation,
+  Drafts with optimistic concurrency (ETag/If-Match), Publish, immutable
+  Bundle Revisions.
+- Core Fleet: Node Groups with explicit membership, Assignments with
+  duplicate rejection, node status reporting.
+- Core Enrollment and Delivery: hashed single-use ten-minute Enrollment
+  Tokens, CSR-based certificate issuance, per-node age-encrypted and Core-
+  signed envelopes (ADR-0011) served by ETag polling, activation reports and
+  heartbeats, the signed installer artifact service and install script with
+  embedded Core signing key (ADR-0013), public CA endpoint.
+- Agent: enroll/sync/serve CLI, node-local age + mTLS identity, files-only
+  Materializer with staging and atomic current switch, Last Known Good
+  previous revision on failure, manifest hash verification, bounded backoff.
+- Web: bootstrap, login, Applications/Environments/Secrets editor with binding
+  editing, rotate, Draft and Publish, Revisions list, Nodes screen with
+  one-time Install Command, Node Groups and Assignments.
+- Seams: Go integration tests through both HTTP surfaces against real
+  PostgreSQL (8 tests); pytest integration against a real Core behind the
+  devproxy that mirrors the Caddy mTLS contract (35 tests); Vitest/RTL/MSW
+  component tests (4 tests); the Playwright E2E proves bootstrap → author →
+  publish → assign → real install.sh on a node fixture → secret files land
+  with declared mode, token never re-displayed.
+
+### How to run
+
+- Go integration tests: start the test container
+  `docker run -d --name autosecrets-test-pg -e POSTGRES_DB=autosecrets -e POSTGRES_USER=autosecrets -e POSTGRES_PASSWORD=test -p 55433:5432 postgres:17-alpine`,
+  then `go test ./...` in `core/` (skips when PostgreSQL is unreachable).
+- Agent tests: same container, then `.venv/bin/python -m pytest tests/` in
+  `agent/` (integration suite skips without the container).
+- E2E: `scripts/run-e2e.sh` (starts Core, devproxy, vite, and Playwright).

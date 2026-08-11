@@ -1,0 +1,414 @@
+// Package crypto owns Core's key material and cryptographic primitives: the
+// data master key with wrapped per-version data keys, password hashing, token
+// hashing, the internal Agent CA, and the Core signing key. Keys live on the
+// filesystem outside PostgreSQL (ADR-0003) with strict permissions.
+package crypto
+
+import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"math/big"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/argon2"
+)
+
+const (
+	masterKeyFile  = "master.key"
+	caKeyFile      = "agent-ca.key"
+	caCertFile     = "agent-ca.crt"
+	signingKeyFile = "core-signing.key"
+)
+
+// --- master key and AEAD --------------------------------------------------
+
+// MasterKey is the AES-256 data master key kept outside PostgreSQL.
+type MasterKey struct {
+	key []byte
+}
+
+// LoadOrCreateMasterKey loads the master key file or creates it with 0600
+// permissions when absent.
+func LoadOrCreateMasterKey(dir string) (*MasterKey, error) {
+	path := filepath.Join(dir, masterKeyFile)
+	key, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		key = make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, err
+		}
+		if err := writeKeyFile(path, key); err != nil {
+			return nil, err
+		}
+		return &MasterKey{key: key}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 32 {
+		return nil, fmt.Errorf("crypto: master key file %s must be 32 bytes", path)
+	}
+	return &MasterKey{key: key}, nil
+}
+
+// Seal encrypts value with a fresh random data key, wraps the data key with
+// the master key, and returns (wrappedKey, wrapNonce, ciphertext).
+func (m *MasterKey) Seal(value []byte) (wrappedKey, wrapNonce, ciphertext []byte, err error) {
+	dataKey := make([]byte, 32)
+	if _, err := rand.Read(dataKey); err != nil {
+		return nil, nil, nil, err
+	}
+	block, err := aes.NewCipher(m.key)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	wrapNonce = make([]byte, aead.NonceSize())
+	if _, err := rand.Read(wrapNonce); err != nil {
+		return nil, nil, nil, err
+	}
+	wrappedKey = aead.Seal(nil, wrapNonce, dataKey, nil)
+
+	dataBlock, err := aes.NewCipher(dataKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dataAEAD, err := cipher.NewGCM(dataBlock)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	dataNonce := make([]byte, dataAEAD.NonceSize())
+	if _, err := rand.Read(dataNonce); err != nil {
+		return nil, nil, nil, err
+	}
+	ciphertext = dataAEAD.Seal(nil, dataNonce, value, nil)
+	return wrappedKey, append(wrapNonce, dataNonce...), ciphertext, nil
+}
+
+// Open reverses Seal.
+func (m *MasterKey) Open(wrappedKey, nonces, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(m.key)
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(nonces) < aead.NonceSize() {
+		return nil, errors.New("crypto: truncated nonce")
+	}
+	wrapNonce, dataNonce := nonces[:aead.NonceSize()], nonces[aead.NonceSize():]
+	dataKey, err := aead.Open(nil, wrapNonce, wrappedKey, nil)
+	if err != nil {
+		return nil, err
+	}
+	dataBlock, err := aes.NewCipher(dataKey)
+	if err != nil {
+		return nil, err
+	}
+	dataAEAD, err := cipher.NewGCM(dataBlock)
+	if err != nil {
+		return nil, err
+	}
+	if len(dataNonce) != dataAEAD.NonceSize() {
+		return nil, errors.New("crypto: truncated data nonce")
+	}
+	return dataAEAD.Open(nil, dataNonce, ciphertext, nil)
+}
+
+// --- password and token hashing -------------------------------------------
+
+const (
+	argonTime    = 1
+	argonMemory  = 64 * 1024
+	argonThreads = 4
+	argonKeyLen  = 32
+	saltLen      = 16
+)
+
+// HashPassword returns an argon2id PHC string.
+func HashPassword(password string) (string, error) {
+	salt := make([]byte, saltLen)
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
+	}
+	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version, argonMemory, argonTime, argonThreads,
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(key)), nil
+}
+
+// VerifyPassword checks a PHC string produced by HashPassword. Constant-time
+// comparison of the derived key prevents timing side channels.
+func VerifyPassword(password, phc string) (bool, error) {
+	parts := strings.Split(phc, "$")
+	if len(parts) != 6 || parts[1] != "argon2id" {
+		return false, errors.New("crypto: malformed password hash")
+	}
+	var memory, iterations uint32
+	var parallelism uint8
+	if _, err := fmt.Sscanf(parts[2], "v=%d", new(int)); err != nil {
+		return false, errors.New("crypto: malformed password hash")
+	}
+	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &iterations, &parallelism); err != nil {
+		return false, errors.New("crypto: malformed password hash")
+	}
+	saltB64, keyB64 := parts[4], parts[5]
+	salt, err := base64.RawStdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return false, err
+	}
+	want, err := base64.RawStdEncoding.DecodeString(keyB64)
+	if err != nil {
+		return false, err
+	}
+	got := argon2.IDKey([]byte(password), salt, iterations, memory, parallelism, uint32(len(want)))
+	return subtleConstantTimeEqual(got, want), nil
+}
+
+func subtleConstantTimeEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var v byte
+	for i := range a {
+		v |= a[i] ^ b[i]
+	}
+	return v == 0
+}
+
+// HashToken returns the lowercase hex SHA-256 of a secret token; only hashes
+// are ever persisted.
+func HashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// NewSecret returns a URL-safe random token suitable for session IDs,
+// bootstrap codes, and enrollment tokens.
+func NewSecret(bits int) (string, error) {
+	n := bits / 8
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// --- internal Agent CA (ADR-0006) -----------------------------------------
+
+type CA struct {
+	cert *x509.Certificate
+	key  *ecdsa.PrivateKey
+}
+
+// LoadOrCreateCA loads the internal CA or creates a fresh one with a 10-year
+// validity. The CA certificate is exported for Caddy; the key stays in Core.
+func LoadOrCreateCA(dir string) (*CA, error) {
+	keyPath := filepath.Join(dir, caKeyFile)
+	certPath := filepath.Join(dir, caCertFile)
+	keyBytes, err := os.ReadFile(keyPath)
+	certBytes, errCert := os.ReadFile(certPath)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(errCert, os.ErrNotExist) {
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		keyDER, err := x509.MarshalECPrivateKey(key)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeKeyFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})); err != nil {
+			return nil, err
+		}
+		now := time.Now()
+		template := &x509.Certificate{
+			SerialNumber:          big.NewInt(1),
+			Subject:               pkix.Name{CommonName: "AutoSecrets Agent CA"},
+			NotBefore:             now.Add(-time.Hour),
+			NotAfter:              now.AddDate(10, 0, 0),
+			IsCA:                  true,
+			BasicConstraintsValid: true,
+			KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+			SubjectKeyId:          subjectKeyID(&key.PublicKey),
+		}
+		der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeKeyFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})); err != nil {
+			return nil, err
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, err
+		}
+		return &CA{cert: cert, key: key}, nil
+	}
+	if err != nil || errCert != nil {
+		return nil, err
+	}
+	keyBlock, _ := pem.Decode(keyBytes)
+	if keyBlock == nil {
+		return nil, errors.New("crypto: malformed CA key")
+	}
+	key, err := x509.ParseECPrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	certBlock, _ := pem.Decode(certBytes)
+	if certBlock == nil {
+		return nil, errors.New("crypto: malformed CA certificate")
+	}
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	return &CA{cert: cert, key: key}, nil
+}
+
+func (c *CA) CertPEM() []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.cert.Raw})
+}
+
+// IssueAgentCert signs a certificate for one Managed Node. The serial is the
+// identity Caddy forwards to Core; the CN carries the node ID. Validity is
+// short-lived; renewal is a later phase.
+func (c *CA) IssueAgentCert(nodeID string, csrPEM []byte, ttl time.Duration) (certPEM []byte, serial string, expiresAt time.Time, err error) {
+	csrBlock, _ := pem.Decode(csrPEM)
+	if csrBlock == nil {
+		return nil, "", time.Time{}, errors.New("crypto: malformed CSR")
+	}
+	csr, err := x509.ParseCertificateRequest(csrBlock.Bytes)
+	if err != nil {
+		return nil, "", time.Time{}, err
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, "", time.Time{}, err
+	}
+	serialBig, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, "", time.Time{}, err
+	}
+	now := time.Now()
+	subjectKeyID := subjectKeyID(csr.PublicKey)
+	template := &x509.Certificate{
+		SerialNumber: serialBig,
+		Subject:      pkix.Name{CommonName: "node:" + nodeID},
+		NotBefore:    now.Add(-time.Minute),
+		NotAfter:     now.Add(ttl),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		SubjectKeyId: subjectKeyID[:20],
+		AuthorityKeyId: c.cert.SubjectKeyId,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, c.cert, csr.PublicKey, c.key)
+	if err != nil {
+		return nil, "", time.Time{}, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		serialBig.Text(16), now.Add(ttl), nil
+}
+
+// subjectKeyID returns the RFC 5280 standard Subject Key Identifier: SHA-1 of
+// the subjectPublicKey BIT STRING (the raw key bytes, uncompressed points).
+func subjectKeyID(pub any) []byte {
+	switch p := pub.(type) {
+	case *ecdsa.PublicKey:
+		sum := sha1.Sum(elliptic.Marshal(p.Curve, p.X, p.Y)) //nolint:gosec // RFC 5280 mandates SHA-1 here
+		return sum[:]
+	case ed25519.PublicKey:
+		sum := sha1.Sum(p) //nolint:gosec
+		return sum[:]
+	}
+	return nil
+}
+
+// --- Core signing key -----------------------------------------------------
+
+type Signer struct {
+	priv ed25519.PrivateKey
+	pub  ed25519.PublicKey
+}
+
+func (s *Signer) PublicKey() ed25519.PublicKey { return s.pub }
+func (s *Signer) PrivateKey() ed25519.PrivateKey { return s.priv }
+func (s *Signer) KeyID() string                { return hex.EncodeToString(s.pub[:8]) }
+func (s *Signer) Sign(message []byte) []byte   { return ed25519.Sign(s.priv, message) }
+
+// PublicKeyPEM returns the public key as a PKIX PEM for embedding in the
+// install script and for agent-side verification.
+func (s *Signer) PublicKeyPEM() ([]byte, error) {
+	der, err := x509.MarshalPKIXPublicKey(s.pub)
+	if err != nil {
+		return nil, err
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), nil
+}
+
+// LoadOrCreateSigner loads the Ed25519 Core signing key or creates it.
+func LoadOrCreateSigner(dir string) (*Signer, error) {
+	path := filepath.Join(dir, signingKeyFile)
+	bytes, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		_, priv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, err
+		}
+		der, err := x509.MarshalPKCS8PrivateKey(priv)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeKeyFile(path, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})); err != nil {
+			return nil, err
+		}
+		return &Signer{priv: priv, pub: priv.Public().(ed25519.PublicKey)}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(bytes)
+	if block == nil {
+		return nil, errors.New("crypto: malformed signing key")
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	priv, ok := parsed.(ed25519.PrivateKey)
+	if !ok {
+		return nil, errors.New("crypto: signing key is not Ed25519")
+	}
+	return &Signer{priv: priv, pub: priv.Public().(ed25519.PublicKey)}, nil
+}
+
+func writeKeyFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}

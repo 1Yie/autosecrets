@@ -23,3 +23,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test harness code: polling, subprocess management, and fixture plumbing
+# legitimately use blind excepts and bare subprocess runs.
+"tests/*" = ["BLE001", "PLW1510", "SIM115", "PERF402", "RUF059"]

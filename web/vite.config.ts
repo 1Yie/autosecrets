@@ -12,4 +12,9 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      "/api": { target: process.env.CORE_URL ?? "http://127.0.0.1:18080", changeOrigin: false },
+    },
+  },
 });

@@ -12,3 +12,6 @@ __pycache__/
 # Deployment secrets (never commit)
 deploy/certs/
 .env
+
+# Build artifacts
+agent/build/

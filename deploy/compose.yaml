@@ -26,8 +26,13 @@ services:
       CORE_LISTEN_ADDR: ":8080"
       CORE_TRUSTED_PROXY_CIDRS: ${CORE_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       CORE_PROXY_CERT_HEADER: "X-Autosecrets-Client-Cert"
+      CORE_KEYS_DIR: "/keys"
+      CORE_DB_DSN: "postgres://autosecrets:${AUTOSECRETS_DB_PASSWORD:?set AUTOSECRETS_DB_PASSWORD in the environment}@postgres:5432/autosecrets"
+      CORE_PUBLIC_AGENT_URL: ${CORE_PUBLIC_AGENT_URL:-}
+      CORE_ARTIFACT_DIR: ${CORE_ARTIFACT_DIR:-/artifacts}
     volumes:
-      - keys:/keys:ro
+      - keys:/keys
+      - ${CORE_ARTIFACT_DIR:-./artifacts}:/artifacts:ro
 
   caddy:
     image: caddy:2-alpine

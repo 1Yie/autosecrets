@@ -11,8 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"autosecrets.dev/core/internal/app"
 	"autosecrets.dev/core/internal/config"
-	"autosecrets.dev/core/internal/server"
+	"autosecrets.dev/core/internal/crypto"
+	"autosecrets.dev/core/internal/store"
 )
 
 var version = "dev"
@@ -26,7 +28,41 @@ func main() {
 		cfg.Version = version
 	}
 
-	handler := server.New(cfg, cfg.Version)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	keysDir := config.KeysDir()
+	st, err := store.Connect(ctx, config.DatabaseDSN())
+	if err != nil {
+		log.Fatalf("database error: %v", err)
+	}
+	defer st.Close()
+
+	mk, err := crypto.LoadOrCreateMasterKey(keysDir)
+	if err != nil {
+		log.Fatalf("master key error: %v", err)
+	}
+	ca, err := crypto.LoadOrCreateCA(keysDir)
+	if err != nil {
+		log.Fatalf("agent CA error: %v", err)
+	}
+	signer, err := crypto.LoadOrCreateSigner(keysDir)
+	if err != nil {
+		log.Fatalf("signing key error: %v", err)
+	}
+
+	application := app.New(st, mk, ca, signer, cfg.ManagementBase, cfg.AgentBase, app.Options{
+		Version:        cfg.Version,
+		PublicAgentURL: config.PublicAgentURL(),
+		ArtifactDir:    config.ArtifactDir(),
+		TrustedProxy:   cfg.TrustedProxyCIDRs,
+		CertHeader:     cfg.ProxyCertHeader,
+	})
+	if _, err := application.EmitBootstrapCode(ctx); err != nil {
+		log.Fatalf("bootstrap code error: %v", err)
+	}
+
+	handler := application.Handler()
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           handler,
@@ -35,9 +71,6 @@ func main() {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		log.Printf("autosecrets-core listening on %s (management %s, agent %s)", cfg.ListenAddr, cfg.ManagementBase, cfg.AgentBase)

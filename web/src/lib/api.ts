@@ -1,0 +1,52 @@
+// Transport layer: same-origin fetch with cookie sessions and the CSRF
+// header required by Core for every mutation. No server state lives here;
+// TanStack Query owns that in the feature hooks.
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+let csrfToken = "";
+
+export function setCsrfToken(token: string) {
+  csrfToken = token;
+}
+
+export async function api<T = unknown>(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  const res = await fetch(path, {
+    method,
+    headers,
+    credentials: "same-origin",
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (res.status === 204) return undefined as T;
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  if (!res.ok) {
+    const message =
+      data && typeof data === "object" && "error" in (data as object)
+        ? String((data as { error: string }).error)
+        : `HTTP ${res.status}`;
+    throw new ApiError(res.status, message);
+  }
+  return data as T;
+}
+
+export const apiGet = <T>(path: string) => api<T>("GET", path);
+export const apiPost = <T>(path: string, body?: unknown) => api<T>("POST", path, body);
+export const apiPut = <T>(path: string, body?: unknown) => api<T>("PUT", path, body);

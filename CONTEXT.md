@@ -48,6 +48,10 @@ _Avoid_: Candidate cycling, automatic provider rotation, in-place overwrite
 An immutable snapshot that selects one Secret Version for every Secret in a Secret Bundle.
 _Avoid_: Release, config version, latest bundle
 
+**Bootstrap Code**:
+A short-lived, one-time code emitted by Core on first boot that authorizes creation of the first Administrator.
+_Avoid_: setup password, admin seed, install code
+
 **Draft**:
 A mutable proposed change to a Secret Bundle that has no effect on Managed Nodes.
 _Avoid_: Unpublished revision, pending config, working copy
@@ -107,6 +111,10 @@ _Avoid_: Delete files, detach, remove group
 **Enrollment Token**:
 A short-lived, single-use proof authorizing one Agent to join an Organization and establish its own identity.
 _Avoid_: Agent key, shared token, install password
+
+**Install Command**:
+The Administrator-visible command that installs the Agent on a Managed Node; it carries the server URL, a single Enrollment Token, and the Core signing key used to verify the downloaded artifact.
+_Avoid_: curl line, setup script, agent installer
 
 **Reveal**:
 An audited action that temporarily exposes a Secret value to a re-authenticated Administrator.
