@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Prepare Agent venv (interop tests)
+        run: |
+          python3 -m venv agent/.venv
+          agent/.venv/bin/pip install --quiet -e "agent[dev]"
+      - name: Format check
+        working-directory: core
+        run: |
+          test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: Vet
+        working-directory: core
+        run: go vet ./...
+      - name: Go tests
+        working-directory: core
+        run: go test ./...
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install Agent package
+        run: python -m pip install --quiet -e "agent[dev]"
+      - name: Lint
+        working-directory: agent
+        run: ruff check src tests
+      - name: Python tests
+        working-directory: agent
+        run: python -m pytest tests/ -q
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scanning
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+      - name: Go vulnerability scan
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: core/go.mod
+          go-package: ./...
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Lint
+        working-directory: web
+        run: bun run lint
+      - name: Typecheck and build
+        working-directory: web
+        run: bun run build
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose configuration
+        run: AUTOSECRETS_DB_PASSWORD=ci-only docker compose -f deploy/compose.yaml config -q

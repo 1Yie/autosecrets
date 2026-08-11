@@ -1,0 +1,14 @@
+# Go
+core/bin/
+core/autosecrets-core
+
+# Python
+agent/.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Deployment secrets (never commit)
+deploy/certs/
+.env

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autosecrets-agent"
+version = "0.1.0"
+description = "AutoSecrets managed node agent (phase 0: envelope protocol)"
+requires-python = ">=3.11"
+dependencies = [
+    "age==0.5.1",
+    "cryptography>=43",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.9"]
+
+[project.scripts]
+autosecrets-agent = "autosecrets_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,18 @@
+# Phase-0 skeleton. Replace both hostnames with real DNS names and place the
+# Agent CA certificate at deploy/certs/agent-ca.pem (never commit it).
+
+secrets.example.com {
+	reverse_proxy core:8080
+}
+
+agents.example.com {
+	tls {
+		client_auth {
+			mode require_and_verify
+			trusted_ca_certs /certs/agent-ca.pem
+		}
+	}
+	reverse_proxy core:8080 {
+		header_up X-Autosecrets-Client-Cert {http.request.tls.client.certificate_serial}
+	}
+}
