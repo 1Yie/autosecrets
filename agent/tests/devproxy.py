@@ -8,6 +8,7 @@ tests, exactly as Caddy is in production (ADR-0010).
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import ssl
 import threading
@@ -18,7 +19,12 @@ SERIAL_HEADER = "X-Autosecrets-Client-Cert"
 FORWARD_HEADERS = ("Content-Type", "X-Correlation-ID")
 
 
-def build_server_context(ca_cert: Path, ca_key: Path, hostname: str = "localhost") -> ssl.SSLContext:
+def build_server_context(
+    ca_cert: Path,
+    ca_key: Path,
+    hostname: str = "localhost",
+    san_ips: tuple[str, ...] = (),
+) -> ssl.SSLContext:
     import datetime
 
     from cryptography import x509
@@ -31,6 +37,7 @@ def build_server_context(ca_cert: Path, ca_key: Path, hostname: str = "localhost
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
     now = datetime.datetime.now(datetime.UTC)
+    san = [x509.DNSName(hostname)] + [x509.IPAddress(ipaddress.ip_address(ip)) for ip in san_ips]
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -39,7 +46,7 @@ def build_server_context(ca_cert: Path, ca_key: Path, hostname: str = "localhost
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - datetime.timedelta(minutes=5))
         .not_valid_after(now + datetime.timedelta(days=1))
-        .add_extension(x509.SubjectAlternativeName([x509.DNSName(hostname)]), critical=False)
+        .add_extension(x509.SubjectAlternativeName(san), critical=False)
         .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key_obj.public_key()), critical=False)
         .sign(ca_key_obj, hashes.SHA256())
     )
@@ -114,9 +121,18 @@ def make_proxy_handler(upstream: str, ca_cert_file: str) -> type[BaseHTTPRequest
 
 
 class DevProxy:
-    def __init__(self, upstream: str, ca_cert: Path, ca_key: Path, port: int = 0):
-        ctx = build_server_context(ca_cert, ca_key)
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", port),
+    def __init__(
+        self,
+        upstream: str,
+        ca_cert: Path,
+        ca_key: Path,
+        port: int = 0,
+        bind: str = "127.0.0.1",
+        hostname: str = "localhost",
+        san_ips: tuple[str, ...] = (),
+    ):
+        ctx = build_server_context(ca_cert, ca_key, hostname=hostname, san_ips=san_ips)
+        self.httpd = ThreadingHTTPServer((bind, port),
                                         make_proxy_handler(upstream, str(ca_cert)))
         self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
         self.port = self.httpd.server_address[1]

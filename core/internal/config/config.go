@@ -55,6 +55,12 @@ func ArtifactDir() string {
 	return envOr("CORE_ARTIFACT_DIR", "artifacts")
 }
 
+// InstallCurlOpts returns the environment assignment prepended to generated
+// Install Commands (e.g. "AUTOSECRETS_CURL_OPTS='-k'"). Empty in production.
+func InstallCurlOpts() string {
+	return os.Getenv("CORE_INSTALL_CURL_OPTS")
+}
+
 // FromEnv builds a Config from CORE_* environment variables.
 func FromEnv() (Config, error) {
 	cidrs, err := ParseCIDRs(splitCSV(os.Getenv("CORE_TRUSTED_PROXY_CIDRS")))

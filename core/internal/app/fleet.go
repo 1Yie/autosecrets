@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,25 +15,27 @@ import (
 func (a *App) handleListNodeGroups(w http.ResponseWriter, r *http.Request) {
 	groups, err := a.store.ListNodeGroups(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, groups)
 }
 
 func (a *App) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) {
-	var body struct{ Name string `json:"name"` }
+	var body struct {
+		Name string `json:"name"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !validName(body.Name, 64) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required (max 64 chars)"})
+		writeError(w, http.StatusBadRequest, "bad_request", "name is required (max 64 chars)")
 		return
 	}
 	id := uuid.NewString()
 	if err := a.store.CreateNodeGroup(r.Context(), id, strings.TrimSpace(body.Name)); err != nil {
 		if errors.Is(err, store.ErrDuplicate) {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "node group name already exists"})
+			writeError(w, http.StatusConflict, "duplicate", "node group name already exists")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
@@ -43,17 +46,24 @@ func (a *App) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAddGroupMember(w http.ResponseWriter, r *http.Request) {
-	var body struct{ NodeID string `json:"node_id"` }
+	var body struct {
+		NodeID string `json:"node_id"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NodeID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "node_id is required"})
+		writeError(w, http.StatusBadRequest, "bad_request", "node_id is required")
 		return
 	}
 	if err := a.store.AddGroupMember(r.Context(), r.PathValue("groupID"), body.NodeID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "node group or node not found"})
+			writeError(w, http.StatusNotFound, "not_found", "node group or node not found")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "conflict",
+				"membership would give a managed node multiple sources for the same application and environment")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "member added"})
@@ -61,7 +71,7 @@ func (a *App) handleAddGroupMember(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	if err := a.store.RemoveGroupMember(r.Context(), r.PathValue("groupID"), r.PathValue("nodeID")); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "member removed"})
@@ -70,7 +80,7 @@ func (a *App) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleListAssignments(w http.ResponseWriter, r *http.Request) {
 	assignments, err := a.store.ListAssignments(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, assignments)
@@ -78,39 +88,84 @@ func (a *App) handleListAssignments(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		GroupID    string `json:"group_id"`
-		RevisionID string `json:"revision_id"`
+		GroupID       string `json:"group_id"`
+		ApplicationID string `json:"application_id"`
+		EnvironmentID string `json:"environment_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.GroupID == "" || body.RevisionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "group_id and revision_id are required"})
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
+		body.GroupID == "" || body.ApplicationID == "" || body.EnvironmentID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "group_id, application_id, and environment_id are required")
 		return
 	}
-	id := uuid.NewString()
-	if err := a.store.CreateAssignment(r.Context(), id, body.GroupID, body.RevisionID); err != nil {
+	asg, err := a.store.CreateAssignment(r.Context(), uuid.NewString(), body.GroupID, body.ApplicationID, body.EnvironmentID)
+	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrNotFound):
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "node group or revision not found"})
+			writeError(w, http.StatusNotFound, "not_found", "node group or environment not found")
+		case errors.Is(err, store.ErrBadPayload):
+			writeError(w, http.StatusBadRequest, "bad_request", "environment has no published revision to assign")
+		case errors.Is(err, store.ErrPolicy):
+			writeError(w, http.StatusBadRequest, "activation_policy_required",
+				"environment must define an activation policy before its first assignment")
+		case errors.Is(err, store.ErrConflict):
+			writeError(w, http.StatusConflict, "conflict",
+				"assignment would give a managed node multiple sources for the same application and environment")
 		case errors.Is(err, store.ErrDuplicate):
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "assignment already exists for this group and revision"})
+			writeError(w, http.StatusConflict, "duplicate", "assignment already exists for this node group and bundle")
 		default:
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		}
 		return
 	}
 	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
-		Actor: actorFrom(r), Action: "assignment.create", Resource: id,
-		Result: "ok", CorrelationID: a.correlationID(r),
+		Actor: actorFrom(r), Action: "assignment.create", Resource: asg.ID,
+		Result:        fmt.Sprintf("bundle=%s/%s group=%s", asg.ApplicationID, asg.EnvironmentID, asg.GroupName),
+		CorrelationID: a.correlationID(r),
 	})
-	writeJSON(w, http.StatusCreated, map[string]string{"id": id, "group_id": body.GroupID, "revision_id": body.RevisionID})
+	writeJSON(w, http.StatusCreated, asg)
 }
 
 func (a *App) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	nodes, err := a.store.ListNode(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, nodes)
+	convergence, err := a.store.AllNodeConvergence(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	counts, err := a.store.NodeAssignmentCounts(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	now := a.now()
+	out := make([]map[string]any, 0, len(nodes))
+	for _, node := range nodes {
+		rows := convergence[node.ID]
+		hasFailed := false
+		allConverged := len(rows) > 0
+		for _, row := range rows {
+			if row.Result == "failed" {
+				hasFailed = true
+			}
+			if row.DesiredRevision != row.ObservedRevision || row.ObservedRevision == "" {
+				allConverged = false
+			}
+		}
+		hasAssignment := counts[node.ID] > 0
+		state, unassigned := deriveNodeState(node.LastSeenAt, now, a.cfg.OfflineAfter,
+			hasFailed, hasAssignment, allConverged)
+		out = append(out, map[string]any{
+			"id": node.ID, "name": node.Name, "serial": node.Serial,
+			"created_at": node.CreatedAt, "last_seen_at": node.LastSeenAt,
+			"desired_etag": node.DesiredETag, "observed_revision": node.ObservedRevision,
+			"last_result": node.LastResult, "state": state, "unassigned": unassigned,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +180,7 @@ func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	events, err := a.store.ListAudit(r.Context(), filter)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, events)

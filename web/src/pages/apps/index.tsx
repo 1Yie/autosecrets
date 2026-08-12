@@ -23,16 +23,16 @@ export function AppsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">Applications</h1>
+      <h1 className="text-xl font-bold">应用</h1>
       {apps.isLoading && (
         <div className="space-y-2">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
       )}
-      {apps.isError && <p className="text-red-500">Failed to load applications</p>}
+      {apps.isError && <p className="text-red-500">应用加载失败</p>}
       {apps.data?.length === 0 && (
-        <p className="opacity-60">No applications yet. Create one to begin.</p>
+        <p className="opacity-60">还没有应用，创建一个开始。</p>
       )}
       <ul className="space-y-2">
         {apps.data?.map((app) => (
@@ -51,12 +51,12 @@ export function AppsPage() {
         })}
       >
         <Input className="flex-1"
-          placeholder="Application name"
+          placeholder="应用名称"
           data-testid="app-name"
           {...register("name")} />
         {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
         <Button variant="default"  type="submit">
-          Create
+          创建
         </Button>
       </form>
     </div>

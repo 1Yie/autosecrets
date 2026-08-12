@@ -32,6 +32,18 @@ _Avoid_: Project, service, repository
 An isolated deployment context of an Application, such as development, staging, or production, that owns its own Secret values and versions.
 _Avoid_: Stage, namespace, profile
 
+**Protected Environment**:
+An Environment whose Secret and Assignment changes require elevated authorization because they can affect sensitive or production infrastructure.
+_Avoid_: Production Environment, secure Environment, locked Environment
+
+**Standard Environment**:
+An Environment whose changes follow normal authenticated authorization because it is not classified as requiring elevated protection.
+_Avoid_: Unprotected Environment, development Environment, low-security Environment
+
+**Unclassified Environment**:
+An existing Environment whose protection level has not yet been confirmed; it is treated as a Protected Environment until an Administrator classifies it.
+_Avoid_: Legacy Environment, unknown Environment, standard by default
+
 **Secret Bundle**:
 The collection of Secrets belonging to one Application and Environment and assigned together.
 _Avoid_: Key set, config file, secret group
@@ -72,6 +84,10 @@ _Avoid_: Secret name, absolute target path, file template
 The atomic switch that makes a Materialized Bundle current on a Managed Node, optionally followed by an allowed service action.
 _Avoid_: Install, deploy, write files
 
+**Activation Policy**:
+The Environment-level declaration of an ordered set of systemd units and one allowed service action applied after Activation and used to stop the Application during Unassignment.
+_Avoid_: Hook, shell command, deployment script
+
 **Last Known Good Revision**:
 The most recent Bundle Revision successfully activated on a Managed Node.
 _Avoid_: Cache, local truth, fallback copy
@@ -80,12 +96,16 @@ _Avoid_: Cache, local truth, fallback copy
 The independent process by which each Managed Node attempts to activate its assigned Desired State while retaining its Last Known Good Revision on failure.
 _Avoid_: Global deployment, synchronization, all-or-nothing rollout
 
+**Assignment Convergence**:
+The independently tracked progress of one Managed Node toward activating the Bundle Revision selected by one Assignment.
+_Avoid_: Node status, sync status, deployment status
+
 **Drift**:
 Any node-local change that makes a Materialized Bundle differ from its assigned Bundle Revision.
 _Avoid_: Local override, manual fix, pending sync
 
 **Rollback**:
-The explicit Administrator action that restores a previous Bundle Revision as Desired State.
+The explicit Administrator action that creates a new Bundle Revision from an earlier snapshot and makes the new revision Desired State.
 _Avoid_: Undo, automatic recovery, downgrade
 
 **Decommissioning**:
@@ -108,6 +128,14 @@ _Avoid_: Deployment, binding, group override
 The explicit removal of a Secret Bundle from a Node Group, requiring affected Applications to stop before their Materialized Bundles are removed.
 _Avoid_: Delete files, detach, remove group
 
+**Unassignment Task**:
+The persistent, per-node progress record for stopping an Application, removing its Materialized Bundle, and completing an Unassignment.
+_Avoid_: Delete job, cleanup request, Assignment deletion
+
+**Abandon Cleanup Confirmation**:
+The emergency Administrator action that stops waiting for unreachable Managed Nodes during Unassignment while explicitly retaining their cleanup as unconfirmed.
+_Avoid_: Force cleanup, successful removal, skip node
+
 **Enrollment Token**:
 A short-lived, single-use proof authorizing one Agent to join an Organization and establish its own identity.
 _Avoid_: Agent key, shared token, install password
@@ -128,6 +156,10 @@ _Avoid_: Login, confirmation dialog, role check
 An immutable record of a security-relevant human, Core, or Agent action and its outcome that never contains Secret values.
 _Avoid_: Application log, activity message, history row
 
+**Operation Reason**:
+The Administrator-provided category and explanation for initiating a high-risk action, optionally linked to an external change or incident record.
+_Avoid_: Comment, note, commit message
+
 **Alert**:
 An actionable current condition requiring Administrator attention, delivered in the Web event center and optionally through a signed webhook.
 _Avoid_: Audit Event, log entry, notification history
@@ -144,10 +176,18 @@ _Avoid_: Delete, retire, clear
 An offline-encrypted package containing the database state and key material required to restore Core.
 _Avoid_: Database dump, volume snapshot, key backup
 
+**Organization Member**:
+A human identity belonging to an Organization and assigned either the Administrator or Viewer role.
+_Avoid_: User, account, operator
+
+**Member Invitation**:
+A short-lived, single-use proof that allows one invited person to establish an Organization Member identity and complete required authentication enrollment.
+_Avoid_: Temporary password, signup link, access token
+
 **Administrator**:
-An Organization member allowed to change Desired State and manage Managed Nodes.
+An Organization Member allowed to change Desired State and manage Managed Nodes.
 _Avoid_: Owner, operator, superuser
 
 **Viewer**:
-An Organization member allowed to inspect metadata, status, and audit history without changing Desired State or revealing Secret values.
+An Organization Member allowed to inspect metadata, status, and audit history without changing Desired State or revealing Secret values.
 _Avoid_: Read-only administrator, guest, auditor

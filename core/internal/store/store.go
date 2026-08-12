@@ -93,14 +93,11 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-// --- Admins and bootstrap -------------------------------------------------
-
-type Admin struct {
-	ID           string
-	Username     string
-	PasswordHash string
-	CreatedAt    time.Time
-}
+// --- Compatibility identity APIs ------------------------------------------
+//
+// The original vertical slice exposed the first Organization Member as an
+// Admin internally. Keep these wrappers until all callers use Member names;
+// the stored schema is extended by 0003_identity_security.sql.
 
 func (s *Store) AdminCount(ctx context.Context) (int, error) {
 	var n int
@@ -109,24 +106,18 @@ func (s *Store) AdminCount(ctx context.Context) (int, error) {
 }
 
 func (s *Store) AdminByUsername(ctx context.Context, username string) (*Admin, error) {
-	row := s.pool.QueryRow(ctx,
-		`SELECT id, username, password_hash, created_at FROM admins WHERE username = $1`, username)
-	return scanAdmin(row)
+	return s.MemberByUsername(ctx, username)
 }
 
 func (s *Store) CreateAdmin(ctx context.Context, id, username, passwordHash string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO admins (id, username, password_hash) VALUES ($1, $2, $3)`,
-		id, username, passwordHash)
-	return err
-}
-
-func scanAdmin(row pgx.Row) (*Admin, error) {
-	a := &Admin{}
-	if err := row.Scan(&a.ID, &a.Username, &a.PasswordHash, &a.CreatedAt); err != nil {
-		return nil, err
+		`INSERT INTO admins (id, username, password_hash, role, status, activated_at)
+		 VALUES ($1, $2, $3, $4, $5, now())`,
+		id, username, passwordHash, RoleAdministrator, MemberActive)
+	if isUniqueViolation(err) {
+		return ErrDuplicate
 	}
-	return a, nil
+	return err
 }
 
 // SaveBootstrapCode stores the hash of an unused bootstrap code.
@@ -150,28 +141,38 @@ func (s *Store) ConsumeBootstrapCode(ctx context.Context, codeHash string, now t
 
 // --- Sessions -------------------------------------------------------------
 
+// CreateSession is retained for the original lifecycle tests. New callers
+// use CreateBoundedSession so both Session limits are explicit at the call
+// site.
 func (s *Store) CreateSession(ctx context.Context, idHash, adminID, csrfToken string, expiresAt time.Time) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO sessions (id_hash, admin_id, csrf_token, expires_at) VALUES ($1, $2, $3, $4)`,
-		idHash, adminID, csrfToken, expiresAt)
-	return err
+	idleExpiresAt := time.Now().Add(30 * time.Minute)
+	if idleExpiresAt.After(expiresAt) {
+		idleExpiresAt = expiresAt
+	}
+	return s.CreateBoundedSession(ctx, idHash, adminID, csrfToken, expiresAt, idleExpiresAt)
 }
 
 // SessionRow is the materialized session state for one request.
 type SessionRow struct {
-	AdminID  string
-	Username string
-	CSRFToken string
+	AdminID       string
+	Username      string
+	Role          string
+	CSRFToken     string
+	SessionIDHash string
+	ExpiresAt     time.Time
+	IdleExpiresAt time.Time
 }
 
 func (s *Store) SessionByID(ctx context.Context, idHash string, now time.Time) (*SessionRow, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT s.admin_id, a.username, s.csrf_token
+		`SELECT s.admin_id, a.username, a.role, s.csrf_token, s.id_hash, s.expires_at, s.idle_expires_at
 		 FROM sessions s JOIN admins a ON a.id = s.admin_id
-		 WHERE s.id_hash = $1 AND s.expires_at > $2`, idHash, now)
+		 WHERE s.id_hash = $1 AND s.expires_at > $2 AND s.idle_expires_at > $2
+		   AND a.status = $3`, idHash, now, MemberActive)
 	var sr SessionRow
-	if err := row.Scan(&sr.AdminID, &sr.Username, &sr.CSRFToken); err != nil {
-		return nil, err
+	if err := row.Scan(&sr.AdminID, &sr.Username, &sr.Role, &sr.CSRFToken,
+		&sr.SessionIDHash, &sr.ExpiresAt, &sr.IdleExpiresAt); err != nil {
+		return nil, mapNoRows(err)
 	}
 	return &sr, nil
 }

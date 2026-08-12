@@ -18,7 +18,7 @@ export function RotateButton({ secret, appId, envId }: RotateButtonProps) {
     <span className="flex gap-1">
       <input
         className="rounded border p-1"
-        placeholder="new value"
+        placeholder="新值"
         value={value}
         onChange={(e) => setValue(e.target.value)}
         data-testid={`rotate-${secret.name}`}
@@ -31,7 +31,7 @@ export function RotateButton({ secret, appId, envId }: RotateButtonProps) {
           setValue("");
         }}
       >
-        Rotate
+        轮换
       </Button>
     </span>
   );

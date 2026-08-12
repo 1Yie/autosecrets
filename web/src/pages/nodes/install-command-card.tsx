@@ -12,7 +12,7 @@ const commandFormSchema = z.object({ name: nameSchema });
 
 export function InstallCommandCard() {
   const install = useInstallCommand();
-  const [copied, setCopied] = useState(false);
+  const [copied, set已复制] = useState(false);
   const { register, handleSubmit } = useForm<{ name: string }>({
     resolver: zodResolver(commandFormSchema),
     defaultValues: { name: "node" },
@@ -22,23 +22,22 @@ export function InstallCommandCard() {
 
   return (
     <section className="rounded border p-4">
-      <h2 className="font-semibold">Add a server</h2>
+      <h2 className="font-semibold">添加服务器</h2>
       <p className="mt-1 text-sm opacity-70">
-        Generate a one-time install command, run it on the server, and its
-        secrets will converge automatically. The token is shown once and
-        expires in 10 minutes.
+        生成一次性安装命令，在目标服务器上执行后，密钥将自动同步到
+        ~/.autosecrets。令牌仅显示一次，10 分钟后过期。
       </p>
-      <form className="mt-2 flex gap-2" onSubmit={handleSubmit((v) => install.mutate(v.name))}>
+      <form className="mt-2 flex gap-2" onSubmit={handleSubmit((v) =>
+        install.mutate({ name: v.name }))}>
         <Input className="flex-1"
-          placeholder="server name (e.g. web-1)"
+          placeholder="服务器名称（如 web-1）"
           data-testid="node-name"
           {...register("name")} />
         <Button variant="default"
-          
           disabled={install.isPending}
           type="submit"
         >
-          Generate
+          生成
         </Button>
       </form>
       {install.isError && (
@@ -49,7 +48,7 @@ export function InstallCommandCard() {
       {install.data && parsed && (
         <div className="mt-3 space-y-2">
           <p className="text-sm font-semibold">
-            Run on the target server (token shown once, expires{" "}
+            在目标服务器上执行（令牌仅显示一次，过期时间：{" "}
             {new Date(install.data.expires_at).toLocaleString()}):
           </p>
           <pre
@@ -62,10 +61,10 @@ export function InstallCommandCard() {
             
             onClick={async () => {
               await navigator.clipboard.writeText(install.data.command);
-              setCopied(true);
+              set已复制(true);
             }}
           >
-            {copied ? "Copied" : "Copy command"}
+            {copied ? "已复制" : "复制命令"}
           </Button>
         </div>
       )}

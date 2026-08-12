@@ -15,6 +15,7 @@ var (
 	ErrConflict   = errors.New("store: version conflict")
 	ErrBadPayload = errors.New("store: bad payload")
 	ErrNoSecrets  = errors.New("store: no secrets")
+	ErrPolicy     = errors.New("store: activation policy required")
 )
 
 func mapNoRows(err error) error {
@@ -70,11 +71,12 @@ type Environment struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	ApplicationID string `json:"application_id"`
+	Protection    string `json:"protection"`
 }
 
 func (s *Store) ListEnvironments(ctx context.Context, appID string) ([]Environment, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, application_id FROM environments WHERE application_id = $1 ORDER BY name`, appID)
+		`SELECT id, name, application_id, protection_level FROM environments WHERE application_id = $1 ORDER BY name`, appID)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +84,7 @@ func (s *Store) ListEnvironments(ctx context.Context, appID string) ([]Environme
 	out := []Environment{}
 	for rows.Next() {
 		var e Environment
-		if err := rows.Scan(&e.ID, &e.Name, &e.ApplicationID); err != nil {
+		if err := rows.Scan(&e.ID, &e.Name, &e.ApplicationID, &e.Protection); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
@@ -90,9 +92,10 @@ func (s *Store) ListEnvironments(ctx context.Context, appID string) ([]Environme
 	return out, rows.Err()
 }
 
-func (s *Store) CreateEnvironment(ctx context.Context, id, appID, name string) error {
+func (s *Store) CreateEnvironment(ctx context.Context, id, appID, name, protection string) error {
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO environments (id, application_id, name) VALUES ($1, $2, $3)`, id, appID, name)
+		`INSERT INTO environments (id, application_id, name, protection_level) VALUES ($1, $2, $3, $4)`,
+		id, appID, name, protection)
 	if isUniqueViolation(err) {
 		return ErrDuplicate
 	}
@@ -101,9 +104,9 @@ func (s *Store) CreateEnvironment(ctx context.Context, id, appID, name string) e
 
 func (s *Store) GetEnvironment(ctx context.Context, envID, appID string) (*Environment, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT id, name, application_id FROM environments WHERE id = $1 AND application_id = $2`, envID, appID)
+		`SELECT id, name, application_id, protection_level FROM environments WHERE id = $1 AND application_id = $2`, envID, appID)
 	var e Environment
-	if err := row.Scan(&e.ID, &e.Name, &e.ApplicationID); err != nil {
+	if err := row.Scan(&e.ID, &e.Name, &e.ApplicationID, &e.Protection); err != nil {
 		return nil, mapNoRows(err)
 	}
 	return &e, nil
@@ -262,7 +265,7 @@ type DraftSelection struct {
 }
 
 type Draft struct {
-	Version   int64            `json:"version"`
+	Version    int64            `json:"version"`
 	Selections []DraftSelection `json:"selections"`
 }
 
@@ -351,16 +354,25 @@ func (s *Store) UpdateDraftSelections(ctx context.Context, appID, envID string,
 }
 
 type Revision struct {
-	ID           string `json:"id"`
-	DraftVersion int64  `json:"draft_version"`
-	FileCount    int64  `json:"file_count"`
-	CreatedBy    string `json:"created_by"`
-	CreatedAt    string `json:"created_at"`
+	ID              string          `json:"id"`
+	DraftVersion    int64           `json:"draft_version"`
+	FileCount       int64           `json:"file_count"`
+	CreatedBy       string          `json:"created_by"`
+	CreatedAt       string          `json:"created_at"`
+	OperationReason OperationReason `json:"operation_reason"`
+}
+
+// OperationReason records why Desired State changed (ADR-0020). The
+// explanation is 10-500 characters; the external reference is optional.
+type OperationReason struct {
+	Category    string `json:"category"`
+	Explanation string `json:"explanation"`
+	ExternalRef string `json:"external_ref,omitempty"`
 }
 
 // Publish freezes the current Draft selection and File Bindings into an
 // immutable Bundle Revision in one transaction.
-func (s *Store) Publish(ctx context.Context, revisionID, appID, envID, actor string) (*Revision, error) {
+func (s *Store) Publish(ctx context.Context, revisionID, appID, envID, actor string, reason OperationReason) (*Revision, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -382,8 +394,11 @@ func (s *Store) Publish(ctx context.Context, revisionID, appID, envID, actor str
 		return nil, ErrNoSecrets
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO bundle_revisions (id, application_id, environment_id, draft_version, created_by)
-		 VALUES ($1, $2, $3, $4, $5)`, revisionID, appID, envID, draftVersion, actor); err != nil {
+		`INSERT INTO bundle_revisions (id, application_id, environment_id, draft_version, created_by,
+			operation_reason_category, operation_reason_explanation, operation_reason_external_ref)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		revisionID, appID, envID, draftVersion, actor,
+		reason.Category, reason.Explanation, reason.ExternalRef); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -398,12 +413,14 @@ func (s *Store) Publish(ctx context.Context, revisionID, appID, envID, actor str
 		return nil, err
 	}
 	return &Revision{ID: revisionID, DraftVersion: draftVersion, FileCount: n,
-		CreatedBy: actor, CreatedAt: time.Now().UTC().Format(time.RFC3339)}, nil
+		CreatedBy: actor, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		OperationReason: reason}, nil
 }
 
 func (s *Store) ListRevisions(ctx context.Context, appID, envID string) ([]Revision, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT br.id, br.draft_version, br.created_by,
+		       br.operation_reason_category, br.operation_reason_explanation, br.operation_reason_external_ref,
 		       to_char(br.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
 		       (SELECT count(*) FROM revision_files rf WHERE rf.revision_id = br.id)
 		FROM bundle_revisions br
@@ -416,12 +433,91 @@ func (s *Store) ListRevisions(ctx context.Context, appID, envID string) ([]Revis
 	out := []Revision{}
 	for rows.Next() {
 		var r Revision
-		if err := rows.Scan(&r.ID, &r.DraftVersion, &r.CreatedBy, &r.CreatedAt, &r.FileCount); err != nil {
+		if err := rows.Scan(&r.ID, &r.DraftVersion, &r.CreatedBy,
+			&r.OperationReason.Category, &r.OperationReason.Explanation, &r.OperationReason.ExternalRef,
+			&r.CreatedAt, &r.FileCount); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ListAllRevisions returns the newest Bundle Revisions across every
+// Application and Environment, for the Overview projection.
+func (s *Store) ListAllRevisions(ctx context.Context, limit int) ([]Revision, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 5
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT br.id, br.draft_version, br.created_by,
+		       br.operation_reason_category, br.operation_reason_explanation, br.operation_reason_external_ref,
+		       to_char(br.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		       (SELECT count(*) FROM revision_files rf WHERE rf.revision_id = br.id)
+		FROM bundle_revisions br
+		ORDER BY br.created_at DESC, br.id DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Revision{}
+	for rows.Next() {
+		var revision Revision
+		if err := rows.Scan(&revision.ID, &revision.DraftVersion, &revision.CreatedBy,
+			&revision.OperationReason.Category, &revision.OperationReason.Explanation,
+			&revision.OperationReason.ExternalRef, &revision.CreatedAt, &revision.FileCount); err != nil {
+			return nil, err
+		}
+		out = append(out, revision)
+	}
+	return out, rows.Err()
+}
+
+// Rollback copies an earlier Bundle Revision's snapshot into a new immutable
+// Bundle Revision (ADR-0019). Historical revisions are never mutated.
+func (s *Store) Rollback(ctx context.Context, newRevisionID, appID, envID, fromRevisionID, actor string, reason OperationReason) (*Revision, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	var draftVersion int64
+	if err := tx.QueryRow(ctx,
+		`SELECT draft_version FROM bundle_revisions
+		 WHERE id = $1 AND application_id = $2 AND environment_id = $3`,
+		fromRevisionID, appID, envID).Scan(&draftVersion); err != nil {
+		return nil, mapNoRows(err)
+	}
+	var fileCount int64
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM revision_files WHERE revision_id = $1`, fromRevisionID).Scan(&fileCount); err != nil {
+		return nil, err
+	}
+	if fileCount == 0 {
+		return nil, ErrNoSecrets
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO bundle_revisions (id, application_id, environment_id, draft_version, created_by,
+			operation_reason_category, operation_reason_explanation, operation_reason_external_ref)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		newRevisionID, appID, envID, draftVersion, actor,
+		reason.Category, reason.Explanation, reason.ExternalRef); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO revision_files (revision_id, secret_id, path, uid, gid, mode, version_seq)
+		SELECT $1, secret_id, path, uid, gid, mode, version_seq
+		FROM revision_files WHERE revision_id = $2`,
+		newRevisionID, fromRevisionID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &Revision{ID: newRevisionID, DraftVersion: draftVersion, FileCount: fileCount,
+		CreatedBy: actor, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		OperationReason: reason}, nil
 }
 
 func ensureDraftAndBump(ctx context.Context, tx pgx.Tx, appID, envID string) error {
@@ -500,16 +596,41 @@ func (s *Store) CreateNodeGroup(ctx context.Context, id, name string) error {
 }
 
 func (s *Store) AddGroupMember(ctx context.Context, groupID, nodeID string) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO group_members (group_id, node_id) VALUES ($1, $2)
-		 ON CONFLICT DO NOTHING`, groupID, nodeID)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO group_members (group_id, node_id) VALUES ($1, $2)
+		 ON CONFLICT DO NOTHING`, groupID, nodeID); err != nil {
 		if strings.Contains(err.Error(), "violates foreign key constraint") {
 			return ErrNotFound
 		}
 		return err
 	}
-	return nil
+	// A Managed Node may join several groups, but never two groups that
+	// deliver the same Secret Bundle (ADR-0018).
+	var ambiguous bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM assignments a
+			WHERE a.group_id = $1 AND a.status = 'active'
+			  AND EXISTS (
+				SELECT 1 FROM assignments a2
+				JOIN group_members gm2 ON gm2.group_id = a2.group_id
+				WHERE gm2.node_id = $2 AND a2.status = 'active'
+				  AND a2.application_id = a.application_id
+				  AND a2.environment_id = a.environment_id
+				  AND a2.group_id <> a.group_id
+			  )
+		)`, groupID, nodeID).Scan(&ambiguous); err != nil {
+		return err
+	}
+	if ambiguous {
+		return ErrConflict
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) RemoveGroupMember(ctx context.Context, groupID, nodeID string) error {
@@ -519,19 +640,22 @@ func (s *Store) RemoveGroupMember(ctx context.Context, groupID, nodeID string) e
 }
 
 type Assignment struct {
-	ID         string `json:"id"`
-	GroupID    string `json:"group_id"`
-	GroupName  string `json:"group_name"`
-	RevisionID string `json:"revision_id"`
-	CreatedAt  string `json:"created_at"`
+	ID            string `json:"id"`
+	GroupID       string `json:"group_id"`
+	GroupName     string `json:"group_name"`
+	ApplicationID string `json:"application_id"`
+	EnvironmentID string `json:"environment_id"`
+	RevisionID    string `json:"revision_id"`
+	Status        string `json:"status"`
+	CreatedAt     string `json:"created_at"`
 }
 
 func (s *Store) ListAssignments(ctx context.Context) ([]Assignment, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT a.id, a.group_id, ng.name, a.revision_id,
+		SELECT a.id, a.group_id, ng.name, a.application_id, a.environment_id, a.revision_id, a.status,
 		       to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 		FROM assignments a JOIN node_groups ng ON ng.id = a.group_id
-		ORDER BY a.created_at DESC`)
+		ORDER BY a.created_at DESC, a.id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +663,8 @@ func (s *Store) ListAssignments(ctx context.Context) ([]Assignment, error) {
 	out := []Assignment{}
 	for rows.Next() {
 		var a Assignment
-		if err := rows.Scan(&a.ID, &a.GroupID, &a.GroupName, &a.RevisionID, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.GroupID, &a.GroupName, &a.ApplicationID,
+			&a.EnvironmentID, &a.RevisionID, &a.Status, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -547,32 +672,99 @@ func (s *Store) ListAssignments(ctx context.Context) ([]Assignment, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) CreateAssignment(ctx context.Context, id, groupID, revisionID string) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO assignments (id, group_id, revision_id) VALUES ($1, $2, $3)`,
-		id, groupID, revisionID)
+// CreateAssignment relates a Node Group to a Secret Bundle and resolves the
+// Bundle's current Desired Revision. The invariant that one Managed Node
+// never receives the same Bundle from two Assignment sources is enforced
+// transactionally here and in AddGroupMember.
+func (s *Store) CreateAssignment(ctx context.Context, id, groupID, appID, envID string) (*Assignment, error) {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "violates foreign key constraint") {
-			return ErrNotFound
-		}
-		if isUniqueViolation(err) {
-			return ErrDuplicate
-		}
-		return err
+		return nil, err
 	}
-	return nil
+	defer tx.Rollback(ctx)
+	var groupName string
+	if err := tx.QueryRow(ctx, `SELECT name FROM node_groups WHERE id = $1`, groupID).Scan(&groupName); err != nil {
+		return nil, mapNoRows(err)
+	}
+	var envExists bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM environments WHERE id = $1 AND application_id = $2)`,
+		envID, appID).Scan(&envExists); err != nil {
+		return nil, err
+	}
+	if !envExists {
+		return nil, ErrNotFound
+	}
+	hasPolicy, err := s.HasActivationPolicy(ctx, envID)
+	if err != nil {
+		return nil, err
+	}
+	if !hasPolicy {
+		return nil, ErrPolicy
+	}
+	var revisionID string
+	if err := tx.QueryRow(ctx,
+		`SELECT id FROM bundle_revisions
+		 WHERE application_id = $1 AND environment_id = $2
+		 ORDER BY created_at DESC, id DESC LIMIT 1`, appID, envID).Scan(&revisionID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrBadPayload
+		}
+		return nil, err
+	}
+	var ambiguous bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM group_members gm
+			JOIN assignments a2 ON a2.group_id = gm.group_id
+			  AND a2.application_id = $1 AND a2.environment_id = $2
+			  AND a2.status = 'active' AND a2.group_id <> $3
+			WHERE gm.node_id IN (SELECT node_id FROM group_members WHERE group_id = $3)
+		)`, appID, envID, groupID).Scan(&ambiguous); err != nil {
+		return nil, err
+	}
+	if ambiguous {
+		return nil, ErrConflict
+	}
+	var createdAt string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO assignments (id, group_id, application_id, environment_id, revision_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+		id, groupID, appID, envID, revisionID).Scan(&createdAt); err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrDuplicate
+		}
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &Assignment{ID: id, GroupID: groupID, GroupName: groupName,
+		ApplicationID: appID, EnvironmentID: envID, RevisionID: revisionID,
+		Status: "active", CreatedAt: createdAt}, nil
+}
+
+// AdvanceDesiredRevision points every active Assignment for a Secret Bundle
+// at the newly published or rolled-back Revision (ADR-0018).
+func (s *Store) AdvanceDesiredRevision(ctx context.Context, appID, envID, revisionID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE assignments SET revision_id = $3
+		 WHERE application_id = $1 AND environment_id = $2 AND status = 'active'`,
+		appID, envID, revisionID)
+	return err
 }
 
 type Node struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	Serial          string    `json:"serial"`
-	AgePubkey       string    `json:"-"`
-	CreatedAt       time.Time `json:"created_at"`
-	LastSeenAt      *time.Time `json:"last_seen_at"`
-	DesiredETag     string    `json:"desired_etag"`
-	ObservedRevision string   `json:"observed_revision"`
-	LastResult      string    `json:"last_result"`
+	ID               string     `json:"id"`
+	Name             string     `json:"name"`
+	Serial           string     `json:"serial"`
+	AgePubkey        string     `json:"-"`
+	CreatedAt        time.Time  `json:"created_at"`
+	LastSeenAt       *time.Time `json:"last_seen_at"`
+	DesiredETag      string     `json:"desired_etag"`
+	ObservedRevision string     `json:"observed_revision"`
+	LastResult       string     `json:"last_result"`
 }
 
 func (s *Store) ListNode(ctx context.Context) ([]Node, error) {
@@ -607,10 +799,10 @@ func (s *Store) NodeBySerial(ctx context.Context, serial string) (*Node, error) 
 	return &n, nil
 }
 
-func (s *Store) TouchNode(ctx context.Context, nodeID string, observedRevision, lastResult string) error {
+func (s *Store) TouchNode(ctx context.Context, nodeID string, observedRevision, lastResult string, at time.Time) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE nodes SET last_seen_at = now(), observed_revision = $2, last_result = $3
-		WHERE id = $1`, nodeID, observedRevision, lastResult)
+		UPDATE nodes SET last_seen_at = $4, observed_revision = $2, last_result = $3
+		WHERE id = $1`, nodeID, observedRevision, lastResult, at)
 	return err
 }
 
@@ -694,12 +886,12 @@ type RevisionFile struct {
 // phase; the newest revision wins for now).
 func (s *Store) AssignedRevisions(ctx context.Context, nodeID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (br.application_id, br.environment_id) br.id
+		SELECT DISTINCT a.revision_id
 		FROM assignments a
 		JOIN group_members gm ON gm.group_id = a.group_id
-		JOIN bundle_revisions br ON br.id = a.revision_id
 		WHERE gm.node_id = $1
-		ORDER BY br.application_id, br.environment_id, br.created_at DESC`, nodeID)
+		  AND a.status = 'active'
+		ORDER BY a.revision_id`, nodeID)
 	if err != nil {
 		return nil, err
 	}
@@ -734,6 +926,48 @@ func (s *Store) RevisionFiles(ctx context.Context, revisionID string) ([]Revisio
 	return out, rows.Err()
 }
 
+// RevisionVersionMap returns the secret→version selection frozen in a
+// Bundle Revision. Core uses it to derive which Secret Version a node
+// currently has activated (the node reports only the revision id).
+func (s *Store) RevisionVersionMap(ctx context.Context, revisionID string) (map[string]int64, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT secret_id, version_seq FROM revision_files WHERE revision_id = $1`, revisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int64{}
+	for rows.Next() {
+		var secretID string
+		var seq int64
+		if err := rows.Scan(&secretID, &seq); err != nil {
+			return nil, err
+		}
+		out[secretID] = seq
+	}
+	return out, rows.Err()
+}
+
+// SecretVersionSeqs lists the version sequences of a Secret in ascending
+// order. Rotatable rotation walks this list cyclically.
+func (s *Store) SecretVersionSeqs(ctx context.Context, secretID string) ([]int64, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT seq FROM secret_versions WHERE secret_id = $1 ORDER BY seq`, secretID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []int64{}
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		out = append(out, seq)
+	}
+	return out, rows.Err()
+}
+
 // RevisionAppEnv returns the Application and Environment IDs of a revision.
 func (s *Store) RevisionAppEnv(ctx context.Context, revisionID string) (appID, envID string, err error) {
 	err = s.pool.QueryRow(ctx,
@@ -750,4 +984,36 @@ func (s *Store) SecretVersionBlob(ctx context.Context, secretID string, seq int6
 		 WHERE secret_id = $1 AND seq = $2`, secretID, seq).
 		Scan(&wrappedKey, &nonces, &ciphertext)
 	return wrappedKey, nonces, ciphertext, mapNoRows(err)
+}
+
+// SecretAppEnv returns the Application and Environment ids of a Secret.
+func (s *Store) SecretAppEnv(ctx context.Context, secretID string) (appID, envID string, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT application_id, environment_id FROM secrets WHERE id = $1`, secretID).
+		Scan(&appID, &envID)
+	return appID, envID, mapNoRows(err)
+}
+
+// MarkRotation records that an Administrator rotated a Secret to the given
+// version. The newest row is the pending rotation target for that Secret.
+func (s *Store) MarkRotation(ctx context.Context, secretID string, versionSeq int64) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO secret_rotations (secret_id, version_seq) VALUES ($1, $2)`,
+		secretID, versionSeq)
+	return err
+}
+
+// PendingRotation returns the most recent rotation target for a Secret, or
+// 0 when the Secret was never rotated. Nodes are forced onto the target
+// until they have converged to it.
+func (s *Store) PendingRotation(ctx context.Context, secretID string) (int64, error) {
+	var seq int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT version_seq FROM secret_rotations
+		 WHERE secret_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, secretID).
+		Scan(&seq)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return seq, err
 }

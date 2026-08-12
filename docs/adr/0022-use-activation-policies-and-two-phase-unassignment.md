@@ -1,0 +1,5 @@
+# Use Activation Policies and two-phase Unassignment
+
+Each Environment may declare an ordered set of one to five constrained systemd units and one fixed `none`, `reload`, or `restart` Activation Policy; Agents never receive arbitrary commands, per-unit actions, or per-Publish hooks. Unassignment and removal from an assigned Node Group will create a persistent task that keeps the relationship in a removing state until every affected Managed Node has stopped the configured units in reverse order and acknowledged Materialized Bundle cleanup, with pending, failed, and offline outcomes retained for retry. Core will not delete the relationship or claim success when cleanup is unconfirmed.
+
+An Administrator may use Step-up Authentication and an Operation Reason to Abandon Cleanup Confirmation for unreachable nodes. Core may then remove the Desired State relationship but must retain `cleanup_unconfirmed` per node as a highest-priority attention item; when such a node reconnects, cleanup must succeed before it can receive new Desired State.

@@ -1,0 +1,3 @@
+# Classify Environment protection explicitly
+
+Every Environment will be explicitly classified as standard or protected rather than inferring risk from names such as `prod`. Existing Environments migrate to an unclassified state that follows Protected Environment rules until an Administrator classifies them; Protected Environment Publish, Rotation, Assignment changes, Install Command generation, and protection-level changes require a server-side Step-up Grant issued by a password check for the current Session and valid for five minutes. Lowering protection additionally requires the Environment name, an operation reason, an impact preview, and an Audit Event so a classification cannot silently weaken authorization.

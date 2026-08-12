@@ -23,7 +23,7 @@ export function CreateNodeGroupForm() {
       })}
     >
       <Input className="flex-1"
-        placeholder="group name"
+        placeholder="节点组名称"
         {...register("name")} />
       <Button variant="outline"  type="submit">Create</Button>
     </form>

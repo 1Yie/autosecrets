@@ -18,32 +18,52 @@ import (
 // renders the Install Command. The Token appears in this response only.
 func (a *App) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
 	if a.cfg.PublicAgentURL == "" {
-		writeJSON(w, http.StatusServiceUnavailable,
-			map[string]string{"error": "CORE_PUBLIC_AGENT_URL is not configured"})
+		writeError(w, http.StatusServiceUnavailable, "unavailable",
+			"CORE_PUBLIC_AGENT_URL is not configured")
 		return
 	}
-	var body struct{ Name string `json:"name"` }
+	var body struct {
+		Name      string `json:"name"`
+		BundleDir string `json:"bundle_dir"`
+	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	if !validName(body.Name, 64) {
 		body.Name = "node-" + uuid.NewString()[:8]
 	}
+	if body.BundleDir != "" && !strings.HasPrefix(body.BundleDir, "~") &&
+		!strings.HasPrefix(body.BundleDir, "/") {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			"bundle_dir must be an absolute path or start with ~/")
+		return
+	}
 	token, err := crypto.NewSecret(192)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	expiresAt := a.now().Add(tokenTTL)
 	if err := a.store.CreateEnrollmentToken(r.Context(), crypto.HashToken(token), strings.TrimSpace(body.Name), expiresAt); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	base := strings.TrimSuffix(a.cfg.PublicAgentURL, "/")
+	curl := "curl -fsSL"
+	extra := ""
+	if a.cfg.InstallCurlOpts != "" {
+		// --insecure is an explicit argument so it survives the pipe into
+		// sudo bash (an environment assignment would not cross sudo).
+		curl = "curl -k -fsSL"
+		extra = " --insecure"
+	}
+	if body.BundleDir != "" {
+		extra += fmt.Sprintf(" --bundle-dir %q", body.BundleDir)
+	}
 	command := fmt.Sprintf(
-		"curl -fsSL %s%s/install.sh | sudo bash -s -- --server %s --token %s --name %q",
-		base, a.agentBase, base, token, strings.TrimSpace(body.Name))
+		"%s %s%s/install.sh | sudo bash -s -- --server %s --token %s --name %q%s",
+		curl, base, a.agentBase, base, token, strings.TrimSpace(body.Name), extra)
 	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
 		Actor: actorFrom(r), Action: "token.issue", Resource: "",
-		Result: "expires=" + expiresAt.UTC().Format(time.RFC3339),
+		Result:        "expires=" + expiresAt.UTC().Format(time.RFC3339),
 		CorrelationID: a.correlationID(r),
 	})
 	writeJSON(w, http.StatusCreated, map[string]string{
@@ -56,13 +76,13 @@ func (a *App) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
 // as an argument when the command runs.
 func (a *App) handleInstallScript(w http.ResponseWriter, r *http.Request) {
 	if a.cfg.PublicAgentURL == "" {
-		writeJSON(w, http.StatusServiceUnavailable,
-			map[string]string{"error": "CORE_PUBLIC_AGENT_URL is not configured"})
+		writeError(w, http.StatusServiceUnavailable, "unavailable",
+			"CORE_PUBLIC_AGENT_URL is not configured")
 		return
 	}
 	pubPEM, err := a.signer.PublicKeyPEM()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	script := fmt.Sprintf(installScriptTemplate, a.agentBase, a.agentBase, string(pubPEM))
@@ -88,11 +108,15 @@ set -eu
 SERVER=""
 TOKEN=""
 NODE_NAME=""
+INSECURE=""
+BUNDLE_DIR=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --server) SERVER="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
     --name) NODE_NAME="$2"; shift 2 ;;
+    --bundle-dir) BUNDLE_DIR="$2"; shift 2 ;;
+    --insecure) INSECURE="1"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -101,6 +125,20 @@ done
 PREFIX="${AUTOSECRETS_PREFIX:-/opt/autosecrets-agent}"
 CONFIG_DIR="${AUTOSECRETS_CONFIG_DIR:-/etc/autosecrets-agent}"
 STATE_DIR="${AUTOSECRETS_STATE_DIR:-/var/lib/autosecrets-agent}"
+
+# Materialized Bundles land in the invoking user's home by default
+# (~/.autosecrets, like the legacy tool). --bundle-dir overrides.
+if [ -z "$BUNDLE_DIR" ]; then
+  BUNDLE_DIR="~/.autosecrets"
+fi
+# ~ expands to the sudo caller's home, not root's.
+USER_HOME="$HOME"
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+  USER_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+fi
+case "$BUNDLE_DIR" in
+  "~/"*) BUNDLE_DIR="$USER_HOME/${BUNDLE_DIR#\~/}" ;;
+esac
 
 ARCH="$(uname -m)"
 case "$ARCH" in
@@ -129,7 +167,12 @@ cat > "$PUBKEY_FILE" <<'PUBKEY_EOF'
 %[3]s
 PUBKEY_EOF
 
-CURL="curl -fsSL ${AUTOSECRETS_CURL_OPTS:-}"
+if [ -n "$INSECURE" ]; then
+  # Dev/LAN only: the endpoint uses a self-signed dev certificate.
+  CURL="curl -fsSL -k"
+else
+  CURL="curl -fsSL ${AUTOSECRETS_CURL_OPTS:-}"
+fi
 $CURL "$SERVER%[1]s/artifacts/autosecrets-agent-linux-$ART_ARCH.tar.gz" -o "$TMP/agent.tar.gz"
 $CURL "$SERVER%[2]s/artifacts/autosecrets-agent-linux-$ART_ARCH.tar.gz.sig" -o "$TMP/agent.tar.gz.sig"
 verify_artifact "$TMP/agent.tar.gz" "$TMP/agent.tar.gz.sig"
@@ -140,7 +183,7 @@ tar -xzf "$TMP/agent.tar.gz" -C "$PREFIX"
 
 SIGNING_KEY_B64="$(openssl pkey -pubin -in "$PUBKEY_FILE" -outform DER 2>/dev/null | tail -c 32 | base64 -w0)"
 CA_BUNDLE_LINE=""
-if [ -n "${AUTOSECRETS_CURL_OPTS:-}" ]; then
+if [ -n "$INSECURE" ] || [ -n "${AUTOSECRETS_CURL_OPTS:-}" ]; then
   # Dev/E2E only: trust the internal Agent CA for the server TLS endpoint.
   $CURL "$SERVER%[1]s/ca.pem" -o "$STATE_DIR/identity/ca.pem"
   CA_BUNDLE_LINE="ca_bundle = \"$STATE_DIR/identity/ca.pem\""
@@ -148,7 +191,7 @@ fi
 cat > "$CONFIG_DIR/config.toml" <<EOF
 server_url = "$SERVER"
 identity_dir = "$STATE_DIR/identity"
-bundle_dir = "$STATE_DIR/bundles"
+bundle_dir = "$BUNDLE_DIR"
 name = "${NODE_NAME:-$(hostname)}"
 signing_public_key = "$SIGNING_KEY_B64"
 $CA_BUNDLE_LINE
@@ -189,17 +232,17 @@ func (a *App) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if !strings.HasPrefix(name, "autosecrets-agent-linux-") ||
 		(!strings.HasSuffix(name, ".tar.gz") && !strings.HasSuffix(name, ".tar.gz.sig")) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		writeError(w, http.StatusNotFound, "not_found", "artifact not found")
 		return
 	}
 	if strings.Contains(name, "..") || strings.Contains(name, "/") {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		writeError(w, http.StatusNotFound, "not_found", "artifact not found")
 		return
 	}
 	path := filepath.Join(a.cfg.ArtifactDir, name)
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+		writeError(w, http.StatusNotFound, "not_found", "artifact not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
@@ -218,12 +261,12 @@ func (a *App) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
 		body.Token == "" || body.AgePubkey == "" || body.CSR == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "token, age_pubkey, and csr are required"})
+		writeError(w, http.StatusBadRequest, "bad_request", "token, age_pubkey, and csr are required")
 		return
 	}
 	tokenRow, err := a.store.ConsumeEnrollmentToken(r.Context(), crypto.HashToken(body.Token), a.now())
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid, expired, or already-used token"})
+		writeError(w, http.StatusForbidden, "forbidden", "invalid, expired, or already-used token")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
@@ -236,11 +279,11 @@ func (a *App) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	nodeID := uuid.NewString()
 	certPEM, serial, expiresAt, err := a.ca.IssueAgentCert(nodeID, []byte(body.CSR), certTTL)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid CSR"})
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid CSR")
 		return
 	}
 	if err := a.store.RegisterNode(r.Context(), nodeID, name, serial, body.AgePubkey, string(certPEM), expiresAt); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
@@ -248,9 +291,9 @@ func (a *App) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		Result: "ok", CorrelationID: a.correlationID(r),
 	})
 	writeJSON(w, http.StatusCreated, map[string]string{
-		"node_id":   nodeID,
-		"cert_pem":  string(certPEM),
-		"ca_pem":    string(a.ca.CertPEM()),
+		"node_id":    nodeID,
+		"cert_pem":   string(certPEM),
+		"ca_pem":     string(a.ca.CertPEM()),
 		"expires_at": expiresAt.UTC().Format(time.RFC3339),
 	})
 }

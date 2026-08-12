@@ -15,16 +15,16 @@ export function LoginPage() {
 
   return (
     <div className="mx-auto mt-16 max-w-md space-y-4 rounded-lg border p-6">
-      <h1 className="text-xl font-bold">Sign in</h1>
+      <h1 className="text-xl font-bold">登录</h1>
       <form onSubmit={handleSubmit((v) => login.mutate(v))} className="space-y-3">
         <Input className="w-full"
-          placeholder="Username"
+          placeholder="用户名"
           data-testid="username"
           {...register("username")} />
         {errors.username && <p className="text-sm text-red-500">{errors.username.message}</p>}
         <Input className="w-full"
           type="password"
-          placeholder="Password"
+          placeholder="密码"
           data-testid="password"
           {...register("password")} />
         {errors.password && <p className="text-sm text-red-500">{errors.password.message}</p>}
@@ -38,7 +38,7 @@ export function LoginPage() {
           disabled={isSubmitting || login.isPending}
           type="submit"
         >
-          Sign in
+          登录
         </Button>
       </form>
     </div>

@@ -1,0 +1,1691 @@
+openapi: 3.0.3
+servers:
+  - url: /
+    description: Relative to the Core management hostname (e.g. https://core.example.com/api/v1/...)
+info:
+  title: AutoSecrets Core Management API
+  version: v1
+  description: |
+    Session-authenticated management surface of the AutoSecrets Core control
+    plane. This document is the contract: Core handlers are tested against it
+    (kin-openapi response validation), the Web client's TypeScript types are
+    generated from it (openapi-typescript), and CI lints it (redocly).
+
+    The Agent surface (/agent/v1, mTLS + signed envelopes) is contracted by
+    api/agent-envelope/envelope-v1.md and is intentionally not part of this
+    document.
+
+    Terminology follows CONTEXT.md (Application, Environment, Secret Bundle,
+    Draft, Bundle Revision, Node Group, Assignment, Audit Event, ...).
+
+    Error model: every error response carries {"error": string, "code": string}.
+    Clients must switch on `code`, never on the human-readable `error` message.
+    Codes: bad_request, unauthorized, forbidden, not_found, conflict, duplicate,
+    internal, unavailable, step_up_required, payload_too_large.
+security:
+  - sessionCookie: []
+tags:
+  - name: Identity
+  - name: Authoring
+  - name: Fleet
+  - name: Audit
+paths:
+  /api/v1/health:
+    get:
+      operationId: health
+      tags: [Identity]
+      summary: Core health (unauthenticated)
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /api/v1/bootstrap:
+    post:
+      operationId: bootstrap
+      tags: [Identity]
+      summary: Start MFA enrollment for the first Administrator with the one-time Bootstrap Code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, organization_name, username, password]
+              properties:
+                code:
+                  type: string
+                  description: One-time Bootstrap Code printed by Core on first boot
+                organization_name:
+                  type: string
+                  minLength: 1
+                  maxLength: 128
+                username:
+                  type: string
+                  pattern: "^[a-zA-Z0-9._-]{2,64}$"
+                password:
+                  type: string
+                  minLength: 12
+                  description: Argon2id-hashed server-side; never stored in clear
+      responses:
+        "201":
+          description: Pending Administrator MFA enrollment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      tags: [Identity]
+      summary: Complete password plus MFA login and receive a session cookie plus CSRF token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                totp_code:
+                  type: string
+                  description: Six digit TOTP code; exactly one of totp_code or recovery_code is required
+                recovery_code:
+                  type: string
+                  description: Single-use Recovery Code; exactly one of totp_code or recovery_code is required
+      responses:
+        "200":
+          description: Authenticated; Set-Cookie carries the session
+          headers:
+            Set-Cookie:
+              description: autosecrets_session (HttpOnly, SameSite=Lax)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/mfa-enrollment/verify:
+    post:
+      operationId: verifyMFAEnrollment
+      tags: [Identity]
+      summary: Verify a pending member's TOTP enrollment and display Recovery Codes once
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enrollment_token, totp_code]
+              properties:
+                enrollment_token:
+                  type: string
+                totp_code:
+                  type: string
+      responses:
+        "200":
+          description: One-time Recovery Code display
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MFAEnrollmentVerified"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/mfa-enrollment/confirm:
+    post:
+      operationId: confirmMFAEnrollment
+      tags: [Identity]
+      summary: Confirm Recovery Code display and activate the pending member
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation_token]
+              properties:
+                confirmation_token:
+                  type: string
+      responses:
+        "200":
+          description: Member activated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MFAEnrollmentConfirmed"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/renew:
+    post:
+      operationId: renewSession
+      tags: [Identity]
+      summary: Replace the current Session after full MFA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FullMFARequest"
+      responses:
+        "200":
+          description: Renewed Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/step-up:
+    post:
+      operationId: stepUp
+      tags: [Identity]
+      summary: Grant five minutes of Step-up Authentication after password confirmation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Step-up Grant issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [expires_at]
+                properties:
+                  expires_at:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/password:
+    post:
+      operationId: changePassword
+      tags: [Identity]
+      summary: Change password after current password and TOTP confirmation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password, totp_code]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 12
+                  maxLength: 128
+                totp_code:
+                  type: string
+      responses:
+        "200":
+          description: Password changed and current browser Session reissued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      tags: [Identity]
+      summary: Destroy the session
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/me:
+    get:
+      operationId: getMe
+      tags: [Identity]
+      summary: Current identity and bootstrap state (works without a session)
+      security: []
+      responses:
+        "200":
+          description: Bootstrap state, and the session when one exists
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/BootstrapRequired"
+                  - $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/applications:
+    get:
+      operationId: listApplications
+      tags: [Authoring]
+      summary: List Applications
+      responses:
+        "200":
+          description: Applications ordered by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createApplication
+      tags: [Authoring]
+      summary: Create an Application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Application created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Duplicate"
+  /api/v1/applications/{appID}:
+    get:
+      operationId: getApplication
+      tags: [Authoring]
+      summary: Get one Application with its Environments
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+      responses:
+        "200":
+          description: Application detail
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name, environments]
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                  environments:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Environment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/applications/{appID}/environments:
+    post:
+      operationId: createEnvironment
+      tags: [Authoring]
+      summary: Create an explicitly classified Environment inside an Application
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, protection]
+              properties:
+                name:
+                  type: string
+                protection:
+                  type: string
+                  enum: [standard, protected]
+                  description: Explicit classification; never inferred from the name
+                  maxLength: 64
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Environment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Duplicate"
+  /api/v1/applications/{appID}/environments/{envID}/secrets:
+    get:
+      operationId: listSecrets
+      tags: [Authoring]
+      summary: List Secrets in an Environment
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      responses:
+        "200":
+          description: Secrets ordered by name; never includes Secret values
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Secret"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      operationId: createSecret
+      tags: [Authoring]
+      summary: Create a Secret with its first encrypted value
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, value]
+              properties:
+                name:
+                  type: string
+                  maxLength: 128
+                  description: Must not contain '/' or NUL
+                value:
+                  type: string
+                  description: Opaque Secret bytes, encrypted before persistence
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Secret created and selected in the Draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Duplicate"
+  /api/v1/secrets/{secretID}/versions:
+    post:
+      operationId: createSecretVersion
+      tags: [Authoring]
+      summary: Rotate a Secret (append an immutable Secret Version)
+      parameters:
+        - $ref: "#/components/parameters/SecretID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  type: string
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: New version appended and selected in the Draft
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [seq, draft_version]
+                properties:
+                  seq:
+                    type: integer
+                    format: int64
+                  draft_version:
+                    type: integer
+                    format: int64
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/secrets/{secretID}/rotate:
+    post:
+      tags: [Authoring]
+      summary: Rotate a rotatable Secret to its next candidate version
+      description: |
+        Moves the Draft selection to the next candidate version (cyclically)
+        and marks the rotation target. Nodes are forced onto the target on
+        their next poll; afterwards keep-old-value behavior resumes. A Secret
+        with a single version cannot rotate.
+      parameters:
+        - $ref: "#/components/parameters/SecretID"
+      responses:
+        "200":
+          description: Rotation target selected in the Draft
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version_seq, draft_version]
+                properties:
+                  version_seq:
+                    type: integer
+                    format: int64
+                  draft_version:
+                    type: integer
+                    format: int64
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/secrets/{secretID}/binding:
+    put:
+      operationId: updateBinding
+      tags: [Authoring]
+      summary: Replace a Secret's File Binding
+      parameters:
+        - $ref: "#/components/parameters/SecretID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path, mode]
+              properties:
+                path:
+                  type: string
+                  description: Relative POSIX path; rejects absolute, '.', '..', control chars
+                uid:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                gid:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                mode:
+                  type: string
+                  description: Octal mode, one of 0400 0440 0444 0600 0640 0644
+                  pattern: "^0[46][04][04]$"
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Binding updated and Draft bumped
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draft_version, path]
+                properties:
+                  draft_version:
+                    type: integer
+                    format: int64
+                  path:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/applications/{appID}/environments/{envID}/draft:
+    get:
+      operationId: getDraft
+      tags: [Authoring]
+      summary: Get the mutable Draft (Desired State in progress)
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      responses:
+        "200":
+          description: Draft with optimistic-concurrency version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Draft"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updateDraft
+      tags: [Authoring]
+      summary: Replace Draft selections (optimistic concurrency via If-Match)
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+        - name: If-Match
+          in: header
+          required: false
+          description: Expected Draft version; a stale value yields 409 conflict
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selections]
+              properties:
+                selections:
+                  type: object
+                  description: Secret ID to Secret Version sequence (full replacement map)
+                  additionalProperties:
+                    type: integer
+                    format: int64
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Draft updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draft_version]
+                properties:
+                  draft_version:
+                    type: integer
+                    format: int64
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/applications/{appID}/environments/{envID}/publish:
+    post:
+      operationId: publish
+      tags: [Authoring]
+      summary: Freeze the Draft into an immutable Bundle Revision with an Operation Reason
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation_reason]
+              properties:
+                operation_reason:
+                  $ref: "#/components/schemas/OperationReason"
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Bundle Revision created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/applications/{appID}/environments/{envID}/rollback:
+    post:
+      operationId: rollback
+      tags: [Authoring]
+      summary: Create a new immutable Bundle Revision from an earlier snapshot
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_revision_id, operation_reason]
+              properties:
+                source_revision_id:
+                  type: string
+                operation_reason:
+                  $ref: "#/components/schemas/OperationReason"
+      responses:
+        "201":
+          description: Rollback Bundle Revision created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Revision"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/applications/{appID}/environments/{envID}/revisions:
+    get:
+      operationId: listRevisions
+      tags: [Authoring]
+      summary: List Bundle Revisions (metadata only)
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      responses:
+        "200":
+          description: Revisions newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Revision"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/node-groups:
+    get:
+      operationId: listNodeGroups
+      tags: [Fleet]
+      summary: List Node Groups with members
+      responses:
+        "200":
+          description: Node Groups ordered by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NodeGroup"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createNodeGroup
+      tags: [Fleet]
+      summary: Create a Node Group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Node Group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRef"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Duplicate"
+  /api/v1/node-groups/{groupID}/nodes:
+    post:
+      operationId: addGroupMember
+      tags: [Fleet]
+      summary: Add a Managed Node to a Node Group
+      parameters:
+        - $ref: "#/components/parameters/GroupID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id]
+              properties:
+                node_id:
+                  type: string
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "200":
+          description: Member added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/node-groups/{groupID}/nodes/{nodeID}:
+    delete:
+      operationId: removeGroupMember
+      tags: [Fleet]
+      summary: Remove a Managed Node from a Node Group
+      parameters:
+        - $ref: "#/components/parameters/GroupID"
+        - $ref: "#/components/parameters/NodeID"
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "200":
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+  /api/v1/assignments:
+    get:
+      operationId: listAssignments
+      tags: [Fleet]
+      summary: List Assignments
+      responses:
+        "200":
+          description: Assignments newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assignment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createAssignment
+      tags: [Fleet]
+      summary: Assign a Secret Bundle to a Node Group (follows the Desired Revision)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [group_id, application_id, environment_id]
+              properties:
+                group_id:
+                  type: string
+                application_id:
+                  type: string
+                environment_id:
+                  type: string
+      responses:
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Duplicate"
+  /api/v1/assignments/{assignmentID}:
+    get:
+      operationId: unassignmentState
+      tags: [Fleet]
+      summary: Assignment and its per-node Unassignment tasks
+      parameters:
+        - $ref: "#/components/parameters/AssignmentID"
+      responses:
+        "200":
+          description: Assignment and cleanup tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [assignment, tasks]
+                properties:
+                  assignment:
+                    $ref: "#/components/schemas/Assignment"
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UnassignmentTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/assignments/{assignmentID}/unassign:
+    post:
+      operationId: unassign
+      tags: [Fleet]
+      summary: Start persistent two-phase Unassignment for a Bundle Assignment
+      parameters:
+        - $ref: "#/components/parameters/AssignmentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation_reason]
+              properties:
+                operation_reason:
+                  $ref: "#/components/schemas/OperationReason"
+      responses:
+        "202":
+          description: Unassignment started with per-node tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, status, tasks]
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [removing]
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UnassignmentTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/assignments/{assignmentID}/abandon-cleanup:
+    post:
+      operationId: abandonCleanup
+      tags: [Fleet]
+      summary: Stop waiting for unreachable nodes; records cleanup_unconfirmed per node
+      parameters:
+        - $ref: "#/components/parameters/AssignmentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [operation_reason]
+              properties:
+                operation_reason:
+                  $ref: "#/components/schemas/OperationReason"
+      responses:
+        "200":
+          description: Control-plane waiting ended with unconfirmed local cleanup
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [cleanup_unconfirmed]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/applications/{appID}/environments/{envID}/activation-policy:
+    get:
+      operationId: getActivationPolicy
+      tags: [Fleet]
+      summary: Read the Environment's Activation Policy
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      responses:
+        "200":
+          description: Activation Policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationPolicy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: putActivationPolicy
+      tags: [Fleet]
+      summary: Define the ordered 1-5 unit list and bounded action for an Environment
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units, action, operation_reason]
+              properties:
+                units:
+                  type: array
+                  minItems: 1
+                  maxItems: 5
+                  items:
+                    type: string
+                action:
+                  type: string
+                  enum: [none, reload, restart]
+                operation_reason:
+                  $ref: "#/components/schemas/OperationReason"
+      responses:
+        "200":
+          description: Activation Policy stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivationPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/nodes:
+    get:
+      operationId: listNodes
+      tags: [Fleet]
+      summary: List Managed Nodes and their convergence state
+      responses:
+        "200":
+          description: Nodes ordered by name
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Node"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/overview:
+    get:
+      operationId: overview
+      tags: [Fleet]
+      summary: Timestamped read-only Overview projection
+      responses:
+        "200":
+          description: Overview projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Overview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/nodes/install-command:
+    post:
+      operationId: createInstallCommand
+      tags: [Fleet]
+      summary: Issue a ten-minute single-use Enrollment Token and Install Command
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                  description: Optional node name; a random one is generated when absent
+                bundle_dir:
+                  type: string
+                  description: |
+                    Optional override of the deployment root for the
+                    Materialized Bundle on the node. Defaults to
+                    ~/.autosecrets in the invoking user's home (the legacy
+                    tool's layout); "~" expands to the sudo caller's home.
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Install Command; the Token appears in this response only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallCommand"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/audit-events:
+    get:
+      operationId: listAuditEvents
+      tags: [Audit]
+      summary: List Audit Events (never contains Secret values)
+      parameters:
+        - name: actor
+          in: query
+          required: false
+          description: Filter by exact actor
+          schema:
+            type: string
+        - name: action
+          in: query
+          required: false
+          description: Filter by exact action
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Cap the result set (default 100, max 500); Audit Events grow without bound
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Audit Events newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+components:
+  parameters:
+    AppID:
+      name: appID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Application id (UUID)
+    EnvID:
+      name: envID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Environment id (UUID)
+    AssignmentID:
+      name: assignmentID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Assignment id (UUID)
+    SecretID:
+      name: secretID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Secret id (UUID)
+    GroupID:
+      name: groupID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Node Group id (UUID)
+    NodeID:
+      name: nodeID
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Managed Node id (UUID)
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: autosecrets_session
+      description: HttpOnly session cookie issued by /auth/login
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Required on every non-GET request (double-submit token from /auth/login or /me)
+  responses:
+    BadRequest:
+      description: Request payload or validation failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Missing or expired session
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Invalid CSRF token or forbidden action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Referenced resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: State conflict (e.g. stale Draft version)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Duplicate:
+      description: A uniquely named resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: Dependency or configuration missing (e.g. install flow disabled)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+        service:
+          type: string
+        version:
+          type: string
+    AdminRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    BootstrapResponse:
+      type: object
+      required: [id, username, status, enrollment_token, totp_uri]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        status:
+          type: string
+          enum: [pending_mfa]
+        enrollment_token:
+          type: string
+        totp_uri:
+          type: string
+    LoginResponse:
+      type: object
+      required: [csrf_token, username, id, role, expires_at]
+      properties:
+        csrf_token:
+          type: string
+        username:
+          type: string
+        id:
+          type: string
+        role:
+          type: string
+          enum: [administrator, viewer]
+        expires_at:
+          type: string
+          format: date-time
+    FullMFARequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+        totp_code:
+          type: string
+        recovery_code:
+          type: string
+    MFAEnrollmentVerified:
+      type: object
+      required: [confirmation_token, recovery_codes]
+      properties:
+        confirmation_token:
+          type: string
+        recovery_codes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    MFAEnrollmentConfirmed:
+      type: object
+      required: [id, username, status]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        status:
+          type: string
+          enum: [active]
+    BootstrapRequired:
+      type: object
+      required: [bootstrap_required]
+      properties:
+        bootstrap_required:
+          type: boolean
+          enum: [true]
+    Me:
+      type: object
+      required: [bootstrap_required, organization, member, csrf_token, session_expires_at, idle_expires_at, step_up]
+      properties:
+        bootstrap_required:
+          type: boolean
+          enum: [false]
+        organization:
+          type: object
+          required: [display_name]
+          properties:
+            display_name:
+              type: string
+        member:
+          type: object
+          required: [id, username, role]
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+            role:
+              type: string
+              enum: [administrator, viewer]
+        csrf_token:
+          type: string
+        session_expires_at:
+          type: string
+          format: date-time
+        idle_expires_at:
+          type: string
+          format: date-time
+        step_up:
+          type: boolean
+    Application:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Environment:
+      type: object
+      required: [id, name, application_id, protection]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        application_id:
+          type: string
+        protection:
+          type: string
+          enum: [standard, protected, unclassified]
+    Binding:
+      type: object
+      nullable: true
+      required: [path, uid, gid, mode]
+      properties:
+        path:
+          type: string
+        uid:
+          type: integer
+          format: int64
+        gid:
+          type: integer
+          format: int64
+        mode:
+          type: string
+          description: Octal mode, e.g. "0400"
+    Secret:
+      type: object
+      required: [id, name, binding, latest_version, selected_version]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        binding:
+          $ref: "#/components/schemas/Binding"
+        latest_version:
+          type: integer
+          format: int64
+        selected_version:
+          type: integer
+          format: int64
+    DraftSelection:
+      type: object
+      required: [secret_id, name, version_seq, binding]
+      properties:
+        secret_id:
+          type: string
+        name:
+          type: string
+        version_seq:
+          type: integer
+          format: int64
+        binding:
+          $ref: "#/components/schemas/Binding"
+    Draft:
+      type: object
+      required: [version, selections]
+      properties:
+        version:
+          type: integer
+          format: int64
+        selections:
+          type: array
+          items:
+            $ref: "#/components/schemas/DraftSelection"
+    Revision:
+      type: object
+      required: [id, draft_version, file_count, created_by, created_at, operation_reason]
+      properties:
+        id:
+          type: string
+        draft_version:
+          type: integer
+          format: int64
+        file_count:
+          type: integer
+          format: int64
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        operation_reason:
+          $ref: "#/components/schemas/OperationReason"
+    OperationReason:
+      type: object
+      required: [category, explanation]
+      properties:
+        category:
+          type: string
+          enum: [maintenance, incident_response, access_change, configuration_correction, other]
+        explanation:
+          type: string
+          minLength: 10
+          maxLength: 500
+        external_ref:
+          type: string
+          maxLength: 128
+    NodeGroup:
+      type: object
+      required: [id, name, member_ids]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        member_ids:
+          type: array
+          items:
+            type: string
+    Assignment:
+      type: object
+      required: [id, group_id, group_name, application_id, environment_id, revision_id, status, created_at]
+      properties:
+        id:
+          type: string
+        group_id:
+          type: string
+        group_name:
+          type: string
+        application_id:
+          type: string
+        environment_id:
+          type: string
+        revision_id:
+          type: string
+          description: Current Desired Revision, advanced by Publish and Rollback
+        status:
+          type: string
+          enum: [active, removing]
+        created_at:
+          type: string
+          format: date-time
+    UnassignmentTask:
+      type: object
+      required: [assignment_id, node_id, status, updated_at]
+      properties:
+        assignment_id:
+          type: string
+        node_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, cleaned, failed, offline, cleanup_unconfirmed]
+        error:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    ActivationPolicy:
+      type: object
+      required: [units, action]
+      properties:
+        units:
+          type: array
+          items:
+            type: string
+        action:
+          type: string
+          enum: [none, reload, restart]
+    Node:
+      type: object
+      required: [id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result, state, unassigned]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        serial:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        desired_etag:
+          type: string
+        observed_revision:
+          type: string
+        last_result:
+          type: string
+        state:
+          type: string
+          enum: [never_online, healthy, converging, failed, offline]
+          description: Derived primary state (ADR-0015)
+        unassigned:
+          type: boolean
+    Overview:
+      type: object
+      required: [generated_at, counts, attention, recent_publishes, recent_audit]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        counts:
+          type: object
+          required: [applications, environments, secrets, nodes, node_groups, assignments, audit_events]
+          properties:
+            applications:
+              type: integer
+            environments:
+              type: integer
+            secrets:
+              type: integer
+            nodes:
+              type: integer
+            node_groups:
+              type: integer
+            assignments:
+              type: integer
+            audit_events:
+              type: integer
+        attention:
+          type: array
+          items:
+            type: object
+            required: [kind, count]
+            properties:
+              kind:
+                type: string
+                enum: [failed_convergence, offline_node, unassigned_node, unclassified_environment, cleanup_failed, cleanup_unconfirmed]
+              count:
+                type: integer
+              resource:
+                type: string
+        recent_publishes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Revision"
+        recent_audit:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+    InstallCommand:
+      type: object
+      required: [command, expires_at]
+      properties:
+        command:
+          type: string
+          description: curl | sudo bash Install Command carrying the one-time Token
+        expires_at:
+          type: string
+          format: date-time
+    AuditEvent:
+      type: object
+      required: [id, actor, action, resource, result, correlation_id, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        actor:
+          type: string
+        action:
+          type: string
+        resource:
+          type: string
+        result:
+          type: string
+        correlation_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+          description: Human-readable message; never parse it
+        code:
+          type: string
+          description: Stable machine-readable code; switch on this
+          enum:
+            - bad_request
+            - unauthorized
+            - forbidden
+            - not_found
+            - conflict
+            - duplicate
+            - internal
+            - unavailable
+            - step_up_required
+            - payload_too_large
+            - activation_policy_required

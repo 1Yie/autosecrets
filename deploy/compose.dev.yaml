@@ -1,0 +1,26 @@
+# Local development stack (way B): PostgreSQL only. Core and the Web dev
+# server run on the host for hot reload; see scripts/dev-up.sh.
+# Port 55434: 5432 is taken by the host PostgreSQL, 55433 by the test
+# container (scripts/test-all.sh), 55432 by other local containers.
+name: autosecrets-dev
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: autosecrets
+      POSTGRES_USER: autosecrets
+      POSTGRES_PASSWORD: test
+    ports:
+      - "55434:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U autosecrets -d autosecrets"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_dev_data:

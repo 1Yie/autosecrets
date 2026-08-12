@@ -52,11 +52,12 @@ func main() {
 	}
 
 	application := app.New(st, mk, ca, signer, cfg.ManagementBase, cfg.AgentBase, app.Options{
-		Version:        cfg.Version,
-		PublicAgentURL: config.PublicAgentURL(),
-		ArtifactDir:    config.ArtifactDir(),
-		TrustedProxy:   cfg.TrustedProxyCIDRs,
-		CertHeader:     cfg.ProxyCertHeader,
+		Version:         cfg.Version,
+		PublicAgentURL:  config.PublicAgentURL(),
+		ArtifactDir:     config.ArtifactDir(),
+		InstallCurlOpts: config.InstallCurlOpts(),
+		TrustedProxy:    cfg.TrustedProxyCIDRs,
+		CertHeader:      cfg.ProxyCertHeader,
 	})
 	if _, err := application.EmitBootstrapCode(ctx); err != nil {
 		log.Fatalf("bootstrap code error: %v", err)

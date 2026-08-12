@@ -5,7 +5,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import random
+import shutil
+import subprocess
 import time
 from datetime import UTC, datetime
 
@@ -22,6 +25,8 @@ from autosecrets_agent.identity import (
 from autosecrets_agent.materializer import (
     materialize,
     parse_payload,
+    remove_manifest_files,
+    save_manifest,
 )
 
 log = logging.getLogger("autosecrets-agent")
@@ -50,7 +55,7 @@ def _activate_envelope(config: AgentConfig, env: dict, identity, verify_key: byt
     parsed = Envelope.from_json(json.dumps(env))
     age_identity = AgePrivateKey.from_private_string(identity.age_private)
     plaintext = parsed.open(age_identity, verify_key, datetime.now(UTC))
-    app_id, env_id, files = parse_payload(plaintext)
+    _app_id, _env_id, files = parse_payload(plaintext)
     from autosecrets_agent.envelope import canonical_manifest
 
     manifest = canonical_manifest([
@@ -59,8 +64,43 @@ def _activate_envelope(config: AgentConfig, env: dict, identity, verify_key: byt
         for f in files
     ])
     parsed.verify_manifest(manifest)
-    materialize(config.bundle_dir, app_id, env_id, parsed.revision_id, files)
+    materialize(config.bundle_dir, files)
+    save_manifest(config.identity_dir, _app_id, _env_id, files)
     return parsed.revision_id
+
+
+def _process_cleanup(config: AgentConfig, identity, api: AgentAPI,
+                     instructions: list[dict]) -> None:
+    """Executes pending cleanup before any new Desired State: stops the
+    Activation Policy units in reverse order, removes the Materialized
+    Bundle files, and acknowledges the result per Assignment."""
+    for instruction in instructions:
+        assignment_id = instruction.get("assignment_id", "")
+        app_id = instruction.get("application_id", "")
+        env_id = instruction.get("environment_id", "")
+        try:
+            if shutil.which("systemctl") and not os.environ.get("AUTOSECRETS_NO_SYSTEMD"):
+                for unit in reversed(instruction.get("units") or []):
+                    stop = subprocess.run(["systemctl", "stop", unit],
+                                          capture_output=True, timeout=60)
+                    if stop.returncode != 0:
+                        # A declared-but-absent or already-inactive unit must
+                        # not block cleanup; only an actually running unit does.
+                        active = subprocess.run(["systemctl", "is-active", unit],
+                                                capture_output=True, text=True, timeout=30)
+                        if active.stdout.strip() in ("active", "activating", "reloading"):
+                            raise RuntimeError(
+                                f"unit {unit} is still {active.stdout.strip()}: "
+                                f"{stop.stderr.decode(errors='replace')[:200]}")
+            remove_manifest_files(config.identity_dir, config.bundle_dir,
+                                  app_id, env_id)
+            api.cleanup(identity.node_id, assignment_id, "cleaned")
+        except Exception as e:  # noqa: BLE001
+            log.error("cleanup failed for %s: %s", assignment_id, e)
+            try:
+                api.cleanup(identity.node_id, assignment_id, "failed", str(e)[:500])
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def sync_once(config: AgentConfig) -> dict:
@@ -77,6 +117,7 @@ def sync_once(config: AgentConfig) -> dict:
             api.heartbeat(identity.node_id)
             return {"changed": False, "revision": ""}
         save_etag(config.identity_dir, body.get("etag", ""))
+        _process_cleanup(config, identity, api, body.get("cleanup") or [])
         last_revision = ""
         failed = 0
         for env in body.get("envelopes", []):

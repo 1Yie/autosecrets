@@ -10,21 +10,26 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -216,6 +221,140 @@ func NewSecret(bits int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
+// PasswordValid applies the member password policy without logging or
+// retaining the supplied password. The local denylist catches the most
+// common leaked values while keeping the check independent of a third party.
+func PasswordValid(password string) bool {
+	if utf8.RuneCountInString(password) < 12 || utf8.RuneCountInString(password) > 128 {
+		return false
+	}
+	_, common := commonPasswords[strings.ToLower(password)]
+	return !common
+}
+
+var commonPasswords = map[string]struct{}{
+	"password":            {},
+	"password123":         {},
+	"123456789012":        {},
+	"qwertyuiop":          {},
+	"letmeinletmein":      {},
+	"autosecrets":         {},
+	"changemechangeme":    {},
+	"administrator":       {},
+	"correcthorsebattery": {},
+}
+
+const (
+	totpPeriod = 30 * time.Second
+	totpDigits = 6
+)
+
+// NewTOTPSecret returns an RFC 4648 base32 secret suitable for a standard
+// RFC 6238 authenticator application.
+func NewTOTPSecret() (string, error) {
+	secret := make([]byte, 20)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(secret), nil
+}
+
+// TOTPURI gives authenticator applications a portable enrollment URI. The
+// caller owns the returned URI and must never persist it in browser storage.
+func TOTPURI(issuer, username, secret string) string {
+	label := url.PathEscape(issuer + ":" + username)
+	values := url.Values{
+		"algorithm": {"SHA1"},
+		"digits":    {strconv.Itoa(totpDigits)},
+		"issuer":    {issuer},
+		"period":    {strconv.Itoa(int(totpPeriod / time.Second))},
+		"secret":    {secret},
+	}
+	return "otpauth://totp/" + label + "?" + values.Encode()
+}
+
+// TOTPCode returns the six digit RFC 6238 code for a testable timestamp.
+func TOTPCode(secret string, at time.Time) (string, error) {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.TrimSpace(secret)))
+	if err != nil {
+		return "", err
+	}
+	if len(key) == 0 {
+		return "", errors.New("crypto: empty TOTP secret")
+	}
+	counter := uint64(at.UTC().Unix() / int64(totpPeriod/time.Second))
+	var message [8]byte
+	for i := 7; i >= 0; i-- {
+		message[i] = byte(counter)
+		counter >>= 8
+	}
+	mac := hmac.New(sha1.New, key)
+	_, _ = mac.Write(message[:])
+	digest := mac.Sum(nil)
+	offset := int(digest[len(digest)-1] & 0x0f)
+	value := (int(digest[offset])&0x7f)<<24 |
+		int(digest[offset+1])<<16 |
+		int(digest[offset+2])<<8 |
+		int(digest[offset+3])
+	return fmt.Sprintf("%0*d", totpDigits, value%1_000_000), nil
+}
+
+// TOTPMatchingCounter returns the matching RFC 6238 counter for the current
+// code plus one adjacent period. Callers store the counter to reject replay.
+func TOTPMatchingCounter(secret, code string, at time.Time) (int64, bool) {
+	if len(code) != totpDigits {
+		return 0, false
+	}
+	for _, offset := range []time.Duration{-totpPeriod, 0, totpPeriod} {
+		candidate := at.Add(offset)
+		want, err := TOTPCode(secret, candidate)
+		if err == nil && subtleConstantTimeEqual([]byte(want), []byte(code)) {
+			return candidate.UTC().Unix() / int64(totpPeriod/time.Second), true
+		}
+	}
+	return 0, false
+}
+
+// VerifyTOTP accepts the current code plus one adjacent period to tolerate a
+// small, expected clock skew. Authentication handlers should prefer
+// TOTPMatchingCounter so they can prevent code replay.
+func VerifyTOTP(secret, code string, at time.Time) bool {
+	_, ok := TOTPMatchingCounter(secret, code, at)
+	return ok
+}
+
+// NewRecoveryCodes returns human-transcribable one-time recovery codes. Only
+// HashToken(code) may be persisted by callers.
+func NewRecoveryCodes(count int) ([]string, error) {
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	if count <= 0 {
+		return nil, nil
+	}
+	codes := make([]string, count)
+	for i := range codes {
+		bytes := make([]byte, 12)
+		if _, err := rand.Read(bytes); err != nil {
+			return nil, err
+		}
+		var b strings.Builder
+		b.Grow(14)
+		for j, value := range bytes {
+			if j == 4 || j == 8 {
+				b.WriteByte('-')
+			}
+			b.WriteByte(alphabet[int(value)%len(alphabet)])
+		}
+		codes[i] = b.String()
+	}
+	return codes, nil
+}
+
+// NormalizeRecoveryCode lets a member enter a displayed code with or without
+// separators while retaining case-insensitive one-time semantics.
+func NormalizeRecoveryCode(code string) string {
+	return strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
+}
+
 // --- internal Agent CA (ADR-0006) -----------------------------------------
 
 type CA struct {
@@ -314,13 +453,13 @@ func (c *CA) IssueAgentCert(nodeID string, csrPEM []byte, ttl time.Duration) (ce
 	now := time.Now()
 	subjectKeyID := subjectKeyID(csr.PublicKey)
 	template := &x509.Certificate{
-		SerialNumber: serialBig,
-		Subject:      pkix.Name{CommonName: "node:" + nodeID},
-		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(ttl),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-		SubjectKeyId: subjectKeyID[:20],
+		SerialNumber:   serialBig,
+		Subject:        pkix.Name{CommonName: "node:" + nodeID},
+		NotBefore:      now.Add(-time.Minute),
+		NotAfter:       now.Add(ttl),
+		KeyUsage:       x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		SubjectKeyId:   subjectKeyID[:20],
 		AuthorityKeyId: c.cert.SubjectKeyId,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, c.cert, csr.PublicKey, c.key)
@@ -352,10 +491,10 @@ type Signer struct {
 	pub  ed25519.PublicKey
 }
 
-func (s *Signer) PublicKey() ed25519.PublicKey { return s.pub }
+func (s *Signer) PublicKey() ed25519.PublicKey   { return s.pub }
 func (s *Signer) PrivateKey() ed25519.PrivateKey { return s.priv }
-func (s *Signer) KeyID() string                { return hex.EncodeToString(s.pub[:8]) }
-func (s *Signer) Sign(message []byte) []byte   { return ed25519.Sign(s.priv, message) }
+func (s *Signer) KeyID() string                  { return hex.EncodeToString(s.pub[:8]) }
+func (s *Signer) Sign(message []byte) []byte     { return ed25519.Sign(s.priv, message) }
 
 // PublicKeyPEM returns the public key as a PKIX PEM for embedding in the
 // install script and for agent-side verification.

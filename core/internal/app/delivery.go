@@ -21,8 +21,16 @@ import (
 // desiredResponse is what a node receives on polling: a stable ETag plus one
 // encrypted, signed envelope per assigned Bundle Revision.
 type desiredResponse struct {
-	ETag      string              `json:"etag"`
+	ETag      string               `json:"etag"`
 	Envelopes []*envelope.Envelope `json:"envelopes"`
+	Cleanup   []cleanupInstruction `json:"cleanup,omitempty"`
+}
+
+type cleanupInstruction struct {
+	AssignmentID  string   `json:"assignment_id"`
+	ApplicationID string   `json:"application_id"`
+	EnvironmentID string   `json:"environment_id"`
+	Units         []string `json:"units,omitempty"`
 }
 
 // handleDesired serves the node's complete Desired State. A 304 is returned
@@ -31,42 +39,66 @@ type desiredResponse struct {
 func (a *App) handleDesired(w http.ResponseWriter, r *http.Request) {
 	node, err := a.nodeFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "unknown node identity"})
+		writeError(w, http.StatusForbidden, "forbidden", "unknown node identity")
 		return
 	}
 	revisionIDs, err := a.store.AssignedRevisions(r.Context(), node.ID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	etag := etagOf(revisionIDs)
+	cleanup := a.cleanupFor(r, node)
+	cleanupIDs := make([]string, 0, len(cleanup))
+	for _, instruction := range cleanup {
+		cleanupIDs = append(cleanupIDs, instruction.AssignmentID)
+	}
+	etag := etagOf(append(revisionIDs, cleanupIDs...))
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
 	_ = a.store.SetNodeDesired(r.Context(), node.ID, etag)
 	if len(revisionIDs) == 0 {
-		writeJSON(w, http.StatusOK, desiredResponse{ETag: etag, Envelopes: []*envelope.Envelope{}})
+		writeJSON(w, http.StatusOK, desiredResponse{ETag: etag, Envelopes: []*envelope.Envelope{}, Cleanup: cleanup})
 		return
 	}
 	recipient, err := age.ParseX25519Recipient(node.AgePubkey)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	envs := make([]*envelope.Envelope, 0, len(revisionIDs))
 	for _, revisionID := range revisionIDs {
-		env, err := a.buildEnvelope(r, node.ID, revisionID, recipient)
+		env, err := a.buildEnvelope(r, node, revisionID, recipient)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
 			return
 		}
 		envs = append(envs, env)
 	}
-	writeJSON(w, http.StatusOK, desiredResponse{ETag: etag, Envelopes: envs})
+	writeJSON(w, http.StatusOK, desiredResponse{ETag: etag, Envelopes: envs, Cleanup: cleanup})
 }
 
-func (a *App) buildEnvelope(r *http.Request, nodeID, revisionID string, recipient *age.X25519Recipient) (*envelope.Envelope, error) {
+// cleanupFor returns the cleanup instructions a node must process before any
+// new Desired State (ADR-0022: cleanup-before-delivery).
+func (a *App) cleanupFor(r *http.Request, node *store.Node) []cleanupInstruction {
+	instructions, err := a.store.PendingCleanupInstructions(r.Context(), node.ID)
+	if err != nil {
+		return nil
+	}
+	out := make([]cleanupInstruction, 0, len(instructions))
+	for _, instruction := range instructions {
+		out = append(out, cleanupInstruction{
+			AssignmentID:  instruction.AssignmentID,
+			ApplicationID: instruction.ApplicationID,
+			EnvironmentID: instruction.EnvironmentID,
+			Units:         instruction.Units,
+		})
+	}
+	return out
+}
+
+func (a *App) buildEnvelope(r *http.Request, node *store.Node, revisionID string, recipient *age.X25519Recipient) (*envelope.Envelope, error) {
 	files, err := a.store.RevisionFiles(r.Context(), revisionID)
 	if err != nil {
 		return nil, err
@@ -74,6 +106,35 @@ func (a *App) buildEnvelope(r *http.Request, nodeID, revisionID string, recipien
 	appID, envID, err := a.store.RevisionAppEnv(r.Context(), revisionID)
 	if err != nil {
 		return nil, err
+	}
+	// Rotatable keep-old-value: derive which Secret Versions the node
+	// currently has activated from its observed revision, so a Publish that
+	// reselects a candidate does not disturb a value still in use. Only
+	// Secrets with more than one version behave this way (single-version
+	// Secrets always follow the revision).
+	observed := map[string]int64{}
+	if node.ObservedRevision != "" {
+		if m, err := a.store.RevisionVersionMap(r.Context(), node.ObservedRevision); err == nil {
+			observed = m
+		}
+	}
+	candidates := map[string][]int64{}
+	hasCandidates := func(secretID string) []int64 {
+		seqs, ok := candidates[secretID]
+		if !ok {
+			seqs, _ = a.store.SecretVersionSeqs(r.Context(), secretID)
+			candidates[secretID] = seqs
+		}
+		return seqs
+	}
+	rotated := map[string]int64{}
+	hasPendingRotation := func(secretID string) int64 {
+		if seq, ok := rotated[secretID]; ok {
+			return seq
+		}
+		seq, _ := a.store.PendingRotation(r.Context(), secretID)
+		rotated[secretID] = seq
+		return seq
 	}
 	type payloadFile struct {
 		Path    string `json:"path"`
@@ -89,7 +150,19 @@ func (a *App) buildEnvelope(r *http.Request, nodeID, revisionID string, recipien
 	}{AppID: appID, EnvID: envID, Files: []payloadFile{}}
 	manifestFiles := []envelope.FileSpec{}
 	for _, f := range files {
-		wrapped, nonces, ct, err := a.store.SecretVersionBlob(r.Context(), f.SecretID, f.VersionSeq)
+		seq := f.VersionSeq
+		// A pending rotation forces the target version; once the node has
+		// converged to it (observed == target) keep-old-value resumes.
+		if target := hasPendingRotation(f.SecretID); target != 0 &&
+			target == f.VersionSeq && observed[f.SecretID] != target {
+			// forced switch: use the rotation target from the revision
+		} else if observedSeq, ok := observed[f.SecretID]; ok {
+			seqs := hasCandidates(f.SecretID)
+			if len(seqs) > 1 && containsSeq(seqs, observedSeq) {
+				seq = observedSeq // keep the value the node is already using
+			}
+		}
+		wrapped, nonces, ct, err := a.store.SecretVersionBlob(r.Context(), f.SecretID, seq)
 		if err != nil {
 			return nil, err
 		}
@@ -122,7 +195,7 @@ func (a *App) buildEnvelope(r *http.Request, nodeID, revisionID string, recipien
 		return nil, err
 	}
 	return envelope.New(envelope.Options{
-		NodeID:       nodeID,
+		NodeID:       node.ID,
 		RevisionID:   revisionID,
 		CreatedAt:    a.now(),
 		ExpiresAt:    a.now().Add(10 * time.Minute),
@@ -132,6 +205,15 @@ func (a *App) buildEnvelope(r *http.Request, nodeID, revisionID string, recipien
 		Signer:       a.signer.PrivateKey(),
 		SigningKeyID: a.signer.KeyID(),
 	})
+}
+
+func containsSeq(seqs []int64, target int64) bool {
+	for _, s := range seqs {
+		if s == target {
+			return true
+		}
+	}
+	return false
 }
 
 // nodeFromRequest resolves the Managed Node behind the forwarded client
@@ -147,15 +229,15 @@ func (a *App) nodeFromRequest(r *http.Request) (*store.Node, error) {
 func (a *App) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	node, err := a.nodeFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "unknown node identity"})
+		writeError(w, http.StatusForbidden, "forbidden", "unknown node identity")
 		return
 	}
 	if node.ID != r.PathValue("nodeID") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "node identity mismatch"})
+		writeError(w, http.StatusForbidden, "forbidden", "node identity mismatch")
 		return
 	}
-	if err := a.store.TouchNode(r.Context(), node.ID, node.ObservedRevision, node.LastResult); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	if err := a.store.TouchNode(r.Context(), node.ID, node.ObservedRevision, node.LastResult, a.now()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -164,11 +246,11 @@ func (a *App) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
 	node, err := a.nodeFromRequest(r)
 	if err != nil {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "unknown node identity"})
+		writeError(w, http.StatusForbidden, "forbidden", "unknown node identity")
 		return
 	}
 	if node.ID != r.PathValue("nodeID") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "node identity mismatch"})
+		writeError(w, http.StatusForbidden, "forbidden", "node identity mismatch")
 		return
 	}
 	var body struct {
@@ -178,19 +260,65 @@ func (a *App) handleReport(w http.ResponseWriter, r *http.Request) {
 		Error      string `json:"error,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Result == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "result is required"})
+		writeError(w, http.StatusBadRequest, "bad_request", "result is required")
 		return
 	}
 	lastResult := body.Result
 	if body.Error != "" {
 		lastResult += ": " + body.Error
 	}
-	if err := a.store.TouchNode(r.Context(), node.ID, body.RevisionID, lastResult); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	asg, asgErr := a.store.AssignmentForNodeRevision(r.Context(), node.ID, body.RevisionID)
+	if asgErr == nil {
+		reportedAt := a.now()
+		if err := a.store.RecordConvergence(r.Context(), store.ConvergenceRow{
+			NodeID: node.ID, AssignmentID: asg.ID,
+			ApplicationID: asg.ApplicationID, EnvironmentID: asg.EnvironmentID,
+			DesiredRevision: asg.RevisionID, ObservedRevision: body.RevisionID,
+			Stage: body.Stage, Result: body.Result, Error: body.Error,
+			ReportedAt: &reportedAt,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+	}
+	if err := a.store.TouchNode(r.Context(), node.ID, body.RevisionID, lastResult, a.now()); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
 		Actor: "node:" + node.Name, Action: "activation." + body.Stage, Resource: body.RevisionID,
+		Result: body.Result, CorrelationID: a.correlationID(r),
+	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})
+}
+
+// handleCleanupReport records the Agent's cleanup acknowledgement for one
+// Unassignment task. Only cleaned or failed results are accepted.
+func (a *App) handleCleanupReport(w http.ResponseWriter, r *http.Request) {
+	node, err := a.nodeFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "forbidden", "unknown node identity")
+		return
+	}
+	if node.ID != r.PathValue("nodeID") {
+		writeError(w, http.StatusForbidden, "forbidden", "node identity mismatch")
+		return
+	}
+	var body struct {
+		AssignmentID string `json:"assignment_id"`
+		Result       string `json:"result"`
+		Error        string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AssignmentID == "" || body.Result == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "assignment_id and result are required")
+		return
+	}
+	if err := a.store.ReportCleanupTask(r.Context(), body.AssignmentID, node.ID, body.Result, body.Error); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "no pending cleanup task for this node")
+		return
+	}
+	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
+		Actor: "node:" + node.Name, Action: "assignment.cleanup", Resource: body.AssignmentID,
 		Result: body.Result, CorrelationID: a.correlationID(r),
 	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recorded"})

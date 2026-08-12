@@ -69,7 +69,7 @@ export function BindingRow({ secret, appId, envId }: BindingRowProps) {
         className="h-8"
         disabled={!isDirty || update.isPending}
       >
-        Save
+        保存
       </Button>
       {errors.path && <p className="text-xs text-red-500">{errors.path.message}</p>}
     </form>

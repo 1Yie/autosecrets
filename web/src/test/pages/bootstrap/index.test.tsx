@@ -12,7 +12,7 @@ describe("BootstrapPage", () => {
         <BootstrapPage />
       </QueryClientProvider>,
     );
-    const button = screen.getByRole("button", { name: "Create administrator" });
+    const button = screen.getByRole("button", { name: "创建管理员" });
     expect(button).toBeDisabled();
 
     const user = userEvent.setup();

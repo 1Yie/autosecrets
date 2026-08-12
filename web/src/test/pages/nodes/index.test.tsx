@@ -20,7 +20,7 @@ describe("NodesPage install command", () => {
     renderPage();
     const user = userEvent.setup();
     await user.type(screen.getByTestId("node-name"), "web-1");
-    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(screen.getByRole("button", { name: "生成" }));
 
     const command = await screen.findByTestId("install-command");
     expect(command.textContent).toContain("--token one-time-token-abc");
@@ -31,7 +31,7 @@ describe("NodesPage install command", () => {
     renderPage();
     const user = userEvent.setup();
     await user.type(screen.getByTestId("node-name"), "web-1");
-    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(screen.getByRole("button", { name: "生成" }));
     const command = await screen.findByTestId("install-command");
     expect(screen.getAllByTestId("install-command")).toHaveLength(1);
     expect(command.textContent).toContain("one-time-token-abc");
@@ -43,9 +43,9 @@ describe("NodesPage install command", () => {
     const user = userEvent.setup();
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
     await user.type(screen.getByTestId("node-name"), "web-1");
-    await user.click(screen.getByRole("button", { name: "Generate" }));
+    await user.click(screen.getByRole("button", { name: "生成" }));
     await screen.findByTestId("install-command");
-    fireEvent.click(screen.getByRole("button", { name: "Copy command" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制命令" }));
     await waitFor(() => expect(writeText).toHaveBeenCalled());
     expect(writeText.mock.calls[0][0]).toContain("one-time-token-abc");
   });

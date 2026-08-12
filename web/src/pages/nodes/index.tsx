@@ -17,20 +17,20 @@ export function NodesPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-bold">Nodes</h1>
+      <h1 className="text-xl font-bold">节点</h1>
       <ErrorBoundary>
         <InstallCommandCard />
       </ErrorBoundary>
 
       <section className="rounded border p-4">
-        <h2 className="font-semibold">Managed nodes</h2>
+        <h2 className="font-semibold">托管节点</h2>
         {nodes.isLoading && <Skeleton className="h-24 w-full" />}
         {nodes.isError && <p className="text-sm text-red-500">Nodes 加载失败</p>}
         <NodeTable nodes={nodes.data ?? []} />
       </section>
 
       <section className="rounded border p-4">
-        <h2 className="font-semibold">Node groups</h2>
+        <h2 className="font-semibold">节点组</h2>
         <CreateNodeGroupForm />
         {groups.isLoading && <Skeleton className="h-8 w-48" />}
         {groups.isError && <p className="text-sm text-red-500">Node groups 加载失败</p>}
@@ -53,7 +53,7 @@ function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
     <Table className="mt-2 w-full text-left text-sm">
       <TableHeader>
         <TableRow className="border-b opacity-60">
-          <TableHead className="p-2">Name</TableHead>
+          <TableHead className="p-2">名称</TableHead>
           <TableHead className="p-2">Observed</TableHead>
           <TableHead className="p-2">Last result</TableHead>
           <TableHead className="p-2">Last seen</TableHead>

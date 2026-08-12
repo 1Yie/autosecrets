@@ -33,7 +33,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
 
   return (
     <section className="rounded border p-4">
-      <h2 className="font-semibold">Assignments</h2>
+      <h2 className="font-semibold">分配</h2>
       <form
         className="mt-2 flex gap-2 text-sm"
         onSubmit={handleSubmit((v) => {
@@ -47,7 +47,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
           render={({ field }) => (
             <Select value={field.value} onValueChange={field.onChange}>
               <SelectTrigger className="flex-1">
-                <SelectValue placeholder="group…" />
+                <SelectValue placeholder="选择节点组…" />
               </SelectTrigger>
               <SelectContent>
                 {groups.map((g) => (
@@ -63,7 +63,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
           render={({ field }) => (
             <Select value={field.value} onValueChange={field.onChange}>
               <SelectTrigger className="flex-1" data-testid="assignment-revision">
-                <SelectValue placeholder="revision…" />
+                <SelectValue placeholder="选择修订…" />
               </SelectTrigger>
               <SelectContent>
                 {allRevisions.data?.map((r) => (
@@ -76,7 +76,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
           )}
         />
         <Button type="submit" disabled={createAssignment.isPending}>
-          Assign
+          分配
         </Button>
       </form>
       {errors.group_id && <p className="mt-1 text-sm text-red-500">{errors.group_id.message}</p>}

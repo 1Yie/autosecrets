@@ -48,34 +48,58 @@ class TestParsePayload:
 
 
 class TestMaterialize:
-    def test_atomic_switch_and_mode(self, tmp_path):
+    def test_flat_layout_and_mode(self, tmp_path):
         bundle = tmp_path / "bundles"
-        materialize(bundle, "app-1", "env-1", "rev-1", [f("db_pass", b"secret-1")])
-        current = bundle / "app-1" / "env-1" / "current"
-        assert (current / "db_pass").read_bytes() == b"secret-1"
-        assert stat.S_IMODE(os.stat(current / "db_pass").st_mode) == 0o400
-        assert not (bundle / "app-1" / "env-1" / ".staging-rev-1").exists()
+        materialize(bundle, [f("AI/LLM/API", b"secret-1")])
+        target = bundle / "AI" / "LLM" / "API"
+        assert target.read_bytes() == b"secret-1"
+        assert stat.S_IMODE(os.stat(target).st_mode) == 0o400
 
-        # Second revision switches current → previous, new content current.
-        materialize(bundle, "app-1", "env-1", "rev-2", [f("db_pass", b"secret-2")])
-        assert (current / "db_pass").read_bytes() == b"secret-2"
-        previous = bundle / "app-1" / "env-1" / "previous"
-        assert (previous / "db_pass").read_bytes() == b"secret-1"
+        # Second revision overwrites the flat path; no current/previous tree.
+        materialize(bundle, [f("AI/LLM/API", b"secret-2")])
+        assert target.read_bytes() == b"secret-2"
+        assert not (bundle / "current").exists()
 
-    def test_hash_mismatch_keeps_previous(self, tmp_path):
+    def test_hash_mismatch_raises_and_keeps_old_content(self, tmp_path):
         bundle = tmp_path / "bundles"
-        materialize(bundle, "app-1", "env-1", "rev-1", [f("x", b"good")])
+        materialize(bundle, [f("x", b"good")])
         bad = f("x", b"tampered")
         bad.sha256 = "0" * 64
         with pytest.raises(MaterializeError):
-            materialize(bundle, "app-1", "env-1", "rev-2", [bad])
-        current = bundle / "app-1" / "env-1" / "current"
-        assert (current / "x").read_bytes() == b"good"
-        assert not (bundle / "app-1" / "env-1" / ".staging-rev-2").exists()
+            materialize(bundle, [bad])
+        assert (bundle / "x").read_bytes() == b"good"
 
     def test_unsafe_path_rejected_before_write(self, tmp_path):
         bundle = tmp_path / "bundles"
         with pytest.raises(MaterializeError):
-            materialize(bundle, "app-1", "env-1", "rev-1",
-                        [f("../../escape", b"x")])
-        assert not (bundle / "app-1").exists()
+            materialize(bundle, [f("../../escape", b"x")])
+        assert not (bundle / ".." / "escape").exists()
+
+    def test_undeclared_files_untouched(self, tmp_path):
+        bundle = tmp_path / "bundles"
+        legacy = bundle / "AI" / "DeepSeek"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"legacy-data")
+        materialize(bundle, [f("Token", b"new")])
+        assert legacy.read_bytes() == b"legacy-data"
+        assert (bundle / "Token").read_bytes() == b"new"
+
+    def test_cleanup_removes_only_manifest_files(self, tmp_path):
+        from autosecrets_agent.materializer import (
+            remove_manifest_files,
+            save_manifest,
+        )
+        bundle = tmp_path / "bundles"
+        identity_dir = tmp_path / "identity"
+        files = [f("a.conf", b"aaa"), f("b.conf", b"bbb")]
+        materialize(bundle, files)
+        save_manifest(identity_dir, "app-1", "env-1", files)
+        foreign = bundle / "foreign.conf"
+        foreign.write_bytes(b"keep-me")
+
+        remove_manifest_files(identity_dir, bundle, "app-1", "env-1")
+
+        assert not (bundle / "a.conf").exists()
+        assert not (bundle / "b.conf").exists()
+        assert foreign.exists(), "files outside the manifest must survive cleanup"
+        assert not (identity_dir / "manifests" / "app-1_env-1.json").exists()

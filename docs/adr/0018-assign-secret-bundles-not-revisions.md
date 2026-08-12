@@ -1,0 +1,3 @@
+# Assign Secret Bundles rather than fixed revisions
+
+An Assignment will relate one Secret Bundle, identified by its Application and Environment, to one Node Group and will follow that Bundle's single Desired Revision. Publish immediately advances the Desired Revision for every assigned Node Group after showing the affected groups and nodes; Core rejects any membership or Assignment change that would give one Managed Node multiple sources for the same Application and Environment. The existing revision-pinned implementation conflicts with the domain meaning of Publish and Assignment and will be migrated before release rather than preserved as a second rollout mode.

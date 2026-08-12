@@ -11,6 +11,7 @@ export const API_PATHS = {
   secrets: (appId: string, envId: string) =>
     `/api/v1/applications/${appId}/environments/${envId}/secrets`,
   secretVersions: (secretId: string) => `/api/v1/secrets/${secretId}/versions`,
+  secretRotate: (secretId: string) => `/api/v1/secrets/${secretId}/rotate`,
   secretBinding: (secretId: string) => `/api/v1/secrets/${secretId}/binding`,
   draft: (appId: string, envId: string) =>
     `/api/v1/applications/${appId}/environments/${envId}/draft`,

@@ -14,150 +14,377 @@ import (
 
 var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]{2,64}$`)
 
+const (
+	mfaEnrollmentTTL   = 30 * time.Minute
+	sessionAbsoluteTTL = 12 * time.Hour
+	sessionIdleTTL     = 30 * time.Minute
+	stepUpTTL          = 5 * time.Minute
+	recoveryCodeCount  = 10
+)
+
+type bootstrapRequest struct {
+	Code             string `json:"code"`
+	OrganizationName string `json:"organization_name"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+}
+
 func (a *App) handleBootstrap(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Code     string `json:"code"`
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
+	var body bootstrapRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid JSON")
 		return
 	}
-	if !usernameRe.MatchString(body.Username) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username must be 2-64 chars of [a-zA-Z0-9._-]"})
+	if !validName(body.OrganizationName, 128) || !usernameRe.MatchString(body.Username) || !crypto.PasswordValid(body.Password) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid bootstrap enrollment")
 		return
 	}
-	if len(body.Password) < 10 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 10 characters"})
-		return
-	}
-	count, err := a.store.AdminCount(r.Context())
+	passwordHash, err := crypto.HashPassword(body.Password)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	if count > 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "already bootstrapped"})
-		return
-	}
-	ok, err := a.store.ConsumeBootstrapCode(r.Context(), crypto.HashToken(body.Code), a.now())
-	if err != nil || !ok {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid or expired bootstrap code"})
-		return
-	}
-	hash, err := crypto.HashPassword(body.Password)
+	totpSecret, err := crypto.NewTOTPSecret()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	adminID := uuid.NewString()
-	if err := a.store.CreateAdmin(r.Context(), adminID, body.Username, hash); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "username already taken"})
+	wrappedKey, nonces, ciphertext, err := a.mk.Seal([]byte(totpSecret))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
-		Actor: "bootstrap", Action: "admin.create", Resource: adminID,
-		Result: "ok", CorrelationID: a.correlationID(r),
+	enrollmentToken, err := crypto.NewSecret(192)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	memberID := uuid.NewString()
+	now := a.now()
+	err = a.store.StartBootstrapEnrollment(r.Context(), crypto.HashToken(body.Code), strings.TrimSpace(body.OrganizationName),
+		memberID, body.Username, passwordHash, crypto.HashToken(enrollmentToken), wrappedKey, nonces, ciphertext,
+		now.Add(mfaEnrollmentTTL), store.AuditEvent{
+			Actor: "bootstrap", Action: "member.bootstrap_started", Resource: memberID,
+			Result: "pending_mfa", CorrelationID: a.correlationID(r),
+		})
+	if err != nil {
+		switch err {
+		case store.ErrNotFound:
+			writeError(w, http.StatusForbidden, codeForbidden, "invalid or expired bootstrap code")
+		case store.ErrConflict:
+			writeError(w, http.StatusConflict, codeConflict, "already bootstrapped")
+		case store.ErrDuplicate:
+			writeError(w, http.StatusConflict, codeDuplicate, "username already taken")
+		default:
+			writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"id": memberID, "username": body.Username, "status": "pending_mfa",
+		"enrollment_token": enrollmentToken,
+		"totp_uri":         crypto.TOTPURI("AutoSecrets", body.Username, totpSecret),
 	})
-	writeJSON(w, http.StatusCreated, map[string]string{"id": adminID, "username": body.Username})
+}
+
+func (a *App) handleVerifyMFAEnrollment(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		EnrollmentToken string `json:"enrollment_token"`
+		TOTPCode        string `json:"totp_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.EnrollmentToken == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid MFA enrollment")
+		return
+	}
+	now := a.now()
+	enrollment, err := a.store.MFAEnrollmentByToken(r.Context(), crypto.HashToken(body.EnrollmentToken), now)
+	if err != nil {
+		writeError(w, http.StatusForbidden, codeForbidden, "invalid or expired MFA enrollment")
+		return
+	}
+	secret, err := a.mk.Open(enrollment.WrappedKey, enrollment.Nonces, enrollment.Ciphertext)
+	if err != nil || !crypto.VerifyTOTP(string(secret), body.TOTPCode, now) {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid authentication code")
+		return
+	}
+	recoveryCodes, err := crypto.NewRecoveryCodes(recoveryCodeCount)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	hashes := make([]string, len(recoveryCodes))
+	for i, code := range recoveryCodes {
+		hashes[i] = crypto.HashToken(crypto.NormalizeRecoveryCode(code))
+	}
+	confirmationToken, err := crypto.NewSecret(192)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	if err := a.store.CompleteMFAEnrollment(r.Context(), crypto.HashToken(body.EnrollmentToken), crypto.HashToken(confirmationToken), hashes, now, store.AuditEvent{
+		Actor: "member:" + enrollment.MemberID, Action: "member.mfa_verified", Resource: enrollment.MemberID,
+		Result: "pending_recovery_confirmation", CorrelationID: a.correlationID(r),
+	}); err != nil {
+		writeError(w, http.StatusConflict, codeConflict, "MFA enrollment is no longer pending")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"confirmation_token": confirmationToken,
+		"recovery_codes":     recoveryCodes,
+	})
+}
+
+func (a *App) handleConfirmMFAEnrollment(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ConfirmationToken string `json:"confirmation_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ConfirmationToken == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid recovery confirmation")
+		return
+	}
+	member, err := a.store.ConfirmMFAEnrollment(r.Context(), crypto.HashToken(body.ConfirmationToken), a.now(), store.AuditEvent{
+		Action: "member.activated", Resource: "", Result: "ok", CorrelationID: a.correlationID(r),
+	})
+	if err != nil {
+		writeError(w, http.StatusConflict, codeConflict, "MFA enrollment is no longer pending")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": member.ID, "username": member.Username, "status": member.Status})
 }
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username     string `json:"username"`
+		Password     string `json:"password"`
+		TOTPCode     string `json:"totp_code"`
+		RecoveryCode string `json:"recovery_code"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid JSON")
 		return
 	}
-	admin, err := a.store.AdminByUsername(r.Context(), body.Username)
+	member, err := a.store.MemberByUsername(r.Context(), body.Username)
+	if err != nil || member.Status != store.MemberActive {
+		a.auditLoginDenied(r, body.Username)
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	passwordOK, err := crypto.VerifyPassword(body.Password, member.PasswordHash)
+	if err != nil || !passwordOK || !a.verifySecondFactor(r, member, body.TOTPCode, body.RecoveryCode) {
+		a.auditLoginDenied(r, body.Username)
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	a.issueSession(w, r, member)
+}
+
+func (a *App) handleSessionRenewal(w http.ResponseWriter, r *http.Request) {
+	member := sessionFrom(r)
+	var body struct {
+		Password     string `json:"password"`
+		TOTPCode     string `json:"totp_code"`
+		RecoveryCode string `json:"recovery_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || member == nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid session renewal")
+		return
+	}
+	identity, err := a.store.MemberByID(r.Context(), member.AdminID)
 	if err != nil {
-		_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
-			Actor: body.Username, Action: "auth.login", Result: "denied",
-			CorrelationID: a.correlationID(r),
-		})
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "not authenticated")
 		return
 	}
-	ok, err := crypto.VerifyPassword(body.Password, admin.PasswordHash)
+	passwordOK, err := crypto.VerifyPassword(body.Password, identity.PasswordHash)
+	if err != nil || !passwordOK || !a.verifySecondFactor(r, identity, body.TOTPCode, body.RecoveryCode) {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	_ = a.store.DeleteSession(r.Context(), member.SessionIDHash)
+	a.issueSession(w, r, identity)
+}
+
+func (a *App) handleStepUp(w http.ResponseWriter, r *http.Request) {
+	session := sessionFrom(r)
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || session == nil || body.Password == "" {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid step-up request")
+		return
+	}
+	member, err := a.store.MemberByID(r.Context(), session.AdminID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "not authenticated")
+		return
+	}
+	ok, err := crypto.VerifyPassword(body.Password, member.PasswordHash)
 	if err != nil || !ok {
-		_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
-			Actor: body.Username, Action: "auth.login", Result: "denied",
-			CorrelationID: a.correlationID(r),
-		})
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
+		_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{Actor: actorFrom(r), Action: "auth.step_up", Resource: member.ID, Result: "denied", CorrelationID: a.correlationID(r)})
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
 		return
 	}
+	if err := a.store.GrantStepUp(r.Context(), session.SessionIDHash, a.now().Add(stepUpTTL)); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{Actor: actorFrom(r), Action: "auth.step_up", Resource: member.ID, Result: "ok", CorrelationID: a.correlationID(r)})
+	writeJSON(w, http.StatusOK, map[string]string{"expires_at": timeString(a.now().Add(stepUpTTL))})
+}
+
+func (a *App) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
+	session := sessionFrom(r)
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+		TOTPCode        string `json:"totp_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || session == nil || !crypto.PasswordValid(body.NewPassword) {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid password change")
+		return
+	}
+	member, err := a.store.MemberByID(r.Context(), session.AdminID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "not authenticated")
+		return
+	}
+	ok, err := crypto.VerifyPassword(body.CurrentPassword, member.PasswordHash)
+	if err != nil || !ok || !a.verifySecondFactor(r, member, body.TOTPCode, "") {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	newHash, err := crypto.HashPassword(body.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	if _, err := a.store.Exec(r.Context(), `UPDATE admins SET password_hash = $2 WHERE id = $1`, member.ID, newHash); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	if err := a.store.DeleteMemberSessions(r.Context(), member.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{Actor: "member:" + member.Username, Action: "member.password_changed", Resource: member.ID, Result: "ok", CorrelationID: a.correlationID(r)})
+	a.issueSession(w, r, member)
+}
+
+func (a *App) issueSession(w http.ResponseWriter, r *http.Request, member *store.Member) {
 	sessionID, err := crypto.NewSecret(256)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
 	csrf, err := crypto.NewSecret(128)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	expires := a.now().Add(defaultTTL)
-	if err := a.store.CreateSession(r.Context(), crypto.HashToken(sessionID), admin.ID, csrf, expires); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	now := a.now()
+	absoluteExpires := now.Add(sessionAbsoluteTTL)
+	idleExpires := now.Add(sessionIdleTTL)
+	if err := a.store.CreateBoundedSession(r.Context(), crypto.HashToken(sessionID), member.ID, csrf, absoluteExpires, idleExpires); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: sessionID, Path: "/",
-		HttpOnly: true, SameSite: http.SameSiteLaxMode,
-		Secure: r.TLS != nil, Expires: expires,
-	})
-	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
-		Actor: admin.Username, Action: "auth.login", Result: "ok",
-		CorrelationID: a.correlationID(r),
-	})
-	writeJSON(w, http.StatusOK, map[string]string{
-		"csrf_token": csrf, "username": admin.Username, "id": admin.ID,
-	})
+	if err := a.store.GrantStepUp(r.Context(), crypto.HashToken(sessionID), now.Add(stepUpTTL)); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: sessionID, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil, Expires: absoluteExpires})
+	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{Actor: "member:" + member.Username, Action: "auth.login", Resource: member.ID, Result: "ok", CorrelationID: a.correlationID(r)})
+	writeJSON(w, http.StatusOK, map[string]string{"csrf_token": csrf, "username": member.Username, "id": member.ID, "role": member.Role, "expires_at": timeString(absoluteExpires)})
+}
+
+// requireStepUp enforces the server-side risk policy: the current Session
+// must hold a Step-up Grant issued by recent password confirmation.
+func (a *App) requireStepUp(w http.ResponseWriter, r *http.Request) bool {
+	session := sessionFrom(r)
+	if session == nil {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "not authenticated")
+		return false
+	}
+	has, err := a.store.HasStepUp(r.Context(), session.SessionIDHash, a.now())
+	if err != nil || !has {
+		writeError(w, http.StatusForbidden, codeStepUp, "current password confirmation is required for this action")
+		return false
+	}
+	return true
+}
+
+func (a *App) verifySecondFactor(r *http.Request, member *store.Member, totpCode, recoveryCode string) bool {
+	if recoveryCode != "" {
+		used, err := a.store.ConsumeRecoveryCode(r.Context(), member.ID, crypto.HashToken(crypto.NormalizeRecoveryCode(recoveryCode)), a.now())
+		return err == nil && used
+	}
+	enrollment, err := a.store.TOTPEnrollmentForMember(r.Context(), member.ID)
+	if err != nil || enrollment.VerifiedAt == nil || enrollment.ConfirmedAt == nil {
+		return false
+	}
+	secret, err := a.mk.Open(enrollment.WrappedKey, enrollment.Nonces, enrollment.Ciphertext)
+	if err != nil {
+		return false
+	}
+	counter, valid := crypto.TOTPMatchingCounter(string(secret), totpCode, a.now())
+	if !valid {
+		return false
+	}
+	used, err := a.store.UseTOTP(r.Context(), member.ID, counter)
+	return err == nil && used
+}
+
+func (a *App) auditLoginDenied(r *http.Request, username string) {
+	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{Actor: "member:" + username, Action: "auth.login", Result: "denied", CorrelationID: a.correlationID(r)})
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
 		_ = a.store.DeleteSession(r.Context(), crypto.HashToken(cookie.Value))
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
-	})
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }
 
 func (a *App) handleMe(w http.ResponseWriter, r *http.Request) {
-	// Bootstrap state is exposed here so the panel can choose its first screen.
 	count, err := a.store.AdminCount(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
 	if count == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{"bootstrap_required": true})
 		return
 	}
-	s, ok := a.sessionFromRequest(r)
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "not authenticated"})
+	if pending, err := a.store.PendingMFAEnrollment(r.Context()); err == nil && pending {
+		writeJSON(w, http.StatusOK, map[string]any{"bootstrap_required": false, "mfa_enrollment_required": true})
 		return
 	}
+	session, ok := a.sessionFromRequest(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "not authenticated")
+		return
+	}
+	organization, err := a.store.Organization(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	stepUp, _ := a.store.HasStepUp(r.Context(), session.SessionIDHash, a.now())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"bootstrap_required": false,
-		"admin":              map[string]string{"id": s.AdminID, "username": s.Username},
-		"csrf_token":         s.CSRFToken,
+		"organization":       map[string]string{"display_name": organization.DisplayName},
+		"member":             map[string]string{"id": session.AdminID, "username": session.Username, "role": session.Role},
+		"csrf_token":         session.CSRFToken,
+		"session_expires_at": timeString(session.ExpiresAt),
+		"idle_expires_at":    timeString(session.IdleExpiresAt),
+		"step_up":            stepUp,
 	})
 }
 
-func validName(s string, max int) bool {
-	s = strings.TrimSpace(s)
-	return len(s) > 0 && len(s) <= max
+func validName(value string, max int) bool {
+	value = strings.TrimSpace(value)
+	return len(value) > 0 && len(value) <= max
 }
 
-func timeString(t time.Time) string {
-	return t.UTC().Format(time.RFC3339)
-}
+func timeString(t time.Time) string { return t.UTC().Format(time.RFC3339) }

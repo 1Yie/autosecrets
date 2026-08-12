@@ -31,11 +31,11 @@ export function AppPage() {
       </div>
     );
   }
-  if (app.isError) return <p className="text-red-500">Application not found</p>;
+  if (app.isError) return <p className="text-red-500">应用不存在</p>;
 
   return (
     <div className="space-y-4">
-      <Link to="/apps" className="text-sm opacity-70">← Applications</Link>
+      <Link to="/apps" className="text-sm opacity-70">← 应用</Link>
       <h1 className="text-xl font-bold">{app.data?.name}</h1>
       <div className="flex flex-wrap items-center gap-2">
         {app.data?.environments.map((env) => (
@@ -55,7 +55,7 @@ export function AppPage() {
             reset();
           })}
         >
-          <Input className="" placeholder="new env" {...register("name")} />
+          <Input className="" placeholder="新环境" {...register("name")} />
           <Button variant="outline"  type="submit">+</Button>
         </form>
       </div>
@@ -64,7 +64,7 @@ export function AppPage() {
           <SecretEditor appId={appId ?? ""} envId={activeEnv} />
         </ErrorBoundary>
       ) : (
-        <p className="opacity-60">Select an environment to edit its secrets.</p>
+        <p className="opacity-60">选择环境以编辑其密钥。</p>
       )}
     </div>
   );

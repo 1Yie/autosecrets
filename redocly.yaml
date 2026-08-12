@@ -1,0 +1,15 @@
+# redocly configuration for api/openapi.yaml. Deliberate deviations from the
+# recommended preset:
+#   - license: the project is not yet published under a license identifier.
+#   - csrfToken security scheme is documented but not referenced per
+#     operation: it applies to every non-GET request and is enforced by Core
+#     middleware, which a static per-operation security block cannot express.
+#   - tag-description: tag prose lives in the path summaries.
+extends:
+  - recommended
+rules:
+  info-license: off
+  no-unused-components: off
+  tag-description: off
+  # health is the one operation that cannot fail with 4xx.
+  operation-4xx-response: off

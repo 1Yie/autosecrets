@@ -85,5 +85,11 @@ class AgentAPI:
             "revision_id": revision_id, "stage": stage, "result": result, "error": error,
         })
 
+    def cleanup(self, node_id: str, assignment_id: str, result: str,
+                error: str = "") -> None:
+        self._request("POST", f"/agent/v1/nodes/{node_id}/cleanup", {
+            "assignment_id": assignment_id, "result": result, "error": error,
+        })
+
     def heartbeat(self, node_id: str) -> None:
         self._request("POST", f"/agent/v1/nodes/{node_id}/heartbeat", {})

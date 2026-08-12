@@ -9,6 +9,7 @@ import { secretSchema, type SecretForm } from "../../lib/constants/schemas";
 import { BindingRow } from "./binding-row";
 import { Skeleton } from "../../components/ui/skeleton";
 import { RotateButton } from "./rotate-button";
+import { useRotateSecret } from "../../hooks/applications/use-rotate-secret";
 import { DraftPanel } from "./draft-panel";
 import { RevisionsPanel } from "./revisions-panel";
 import { ErrorBoundary } from "../../components/error-boundary";
@@ -39,12 +40,12 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
           reset();
         })}
       >
-        <Input className="flex-1" placeholder="Secret name"
+        <Input className="flex-1" placeholder="密钥名称"
           data-testid="secret-name" {...register("name")} />
-        <Input className="flex-1" placeholder="Secret value"
+        <Input className="flex-1" placeholder="密钥值"
           data-testid="secret-value" {...register("value")} />
         <Button variant="default"  type="submit">
-          Add secret
+          添加密钥
         </Button>
       </form>
       {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
@@ -55,7 +56,7 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
       <Table className="w-full text-left text-sm">
         <TableHeader>
           <TableRow className="border-b opacity-60">
-            <TableHead className="p-2">Name</TableHead>
+            <TableHead className="p-2">名称</TableHead>
             <TableHead className="p-2">Binding</TableHead>
             <TableHead className="p-2">Version</TableHead>
             <TableHead className="p-2">Rotate</TableHead>
@@ -73,6 +74,9 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
               </TableCell>
               <TableCell className="p-2">
                 <RotateButton secret={s} appId={appId} envId={envId} />
+                {s.latest_version > 1 && (
+                  <RotateNextButton secretId={s.id} appId={appId} envId={envId} />
+                )}
               </TableCell>
             </TableRow>
           ))}
@@ -86,5 +90,26 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
         <RevisionsPanel revisions={revisions} />
       </ErrorBoundary>
     </div>
+  );
+}
+
+/** Rotates the Secret to its next candidate version (old-project style). */
+function RotateNextButton({ secretId, appId, envId }: {
+  secretId: string;
+  appId: string;
+  envId: string;
+}) {
+  const rotate = useRotateSecret(secretId, appId, envId);
+  return (
+    <Button
+      variant="outline"
+      className="ml-1"
+      disabled={rotate.isPending}
+      onClick={() => rotate.mutate()}
+      title="轮换到下一个候选值"
+      data-testid={`rotate-next-${secretId}`}
+    >
+      下一候选
+    </Button>
   );
 }

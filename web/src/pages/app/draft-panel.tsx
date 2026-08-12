@@ -11,7 +11,7 @@ interface DraftPanelProps {
 export function DraftPanel({ draft, publish }: DraftPanelProps) {
   return (
     <section className="rounded border p-4">
-      <h2 className="font-semibold">Draft (v{draft.data?.version ?? "…"})</h2>
+      <h2 className="font-semibold">草稿（v{draft.data?.version ?? "…"}）</h2>
       {draft.isError && <p className="text-sm text-red-500">Draft 加载失败</p>}
       <ul className="mt-2 space-y-1 text-sm">
         {draft.data?.selections.map((sel) => (
@@ -26,7 +26,7 @@ export function DraftPanel({ draft, publish }: DraftPanelProps) {
         disabled={publish.isPending}
         onClick={() => publish.mutate()}
       >
-        Publish revision
+        发布修订
       </Button>
       {publish.isError && (
         <p className="mt-1 text-sm text-red-500">
@@ -34,7 +34,7 @@ export function DraftPanel({ draft, publish }: DraftPanelProps) {
         </p>
       )}
       {publish.isSuccess && (
-        <p className="mt-1 text-sm text-green-600">Published {publish.data?.id}</p>
+        <p className="mt-1 text-sm text-green-600">已发布 {publish.data?.id}</p>
       )}
     </section>
   );

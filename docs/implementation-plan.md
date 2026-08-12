@@ -416,3 +416,101 @@ against [frontend-guidelines.md](./frontend-guidelines.md).
   so the migration has not started and the fallback remains in force.
 - Acceptance: lint, typecheck, build, Vitest, Agent integration, and the
   Playwright E2E stay green throughout; UI behavior is unchanged.
+
+## Test unification and API contract session (grilled decisions)
+
+Recorded after the grilling session that confirmed the backend test
+unification and API contract work; it supersedes no earlier phase ordering.
+
+### Scope
+
+- This session covers test infrastructure unification and the management API
+  contract only. Module layout (identity/secretcontrol/...), TOTP, recovery
+  codes, Step-up Authentication, Reveal, Retire/Purge, Alerts/Webhooks, and
+  explicit Rollback remain deferred to their grilling sessions.
+
+### Decisions
+
+- Go test infrastructure: shared `internal/testutil` harness; every test
+  creates a uniquely named PostgreSQL database on the shared test server
+  (parallel-safe across packages), fails (never skips) when PostgreSQL is
+  unreachable, and drops the database on cleanup. testcontainers-go startup
+  is deferred until the module proxy is reachable; the hook is documented in
+  `testutil.Connect`.
+- Test organization: `app_test.go` split by domain (auth, secrets, fleet,
+  enroll, delivery, smoke) sharing one harness; store-level direct tests
+  added only where the invariant is inherently racy (Draft optimistic-lock
+  conflict, single-use Enrollment Token, expired Token, empty Draft Publish)
+  or for CRUD lifecycle coverage.
+- Single entry point: `scripts/test-all.sh` starts/reuses the shared
+  `autosecrets-test-pg` container, exports `TEST_DATABASE_URL`, and runs
+  Core (vet + tests + coverage gate), Agent pytest, and Web (lint + vitest +
+  build). CI runs the same commands with the same environment.
+- Coverage gate: Core product packages (excluding `cmd/autosecrets-core` and
+  `internal/testutil`) must reach 70% statement coverage; enforced by
+  `scripts/coverage_gate.py` in CI.
+- API contract: `api/openapi.yaml` documents the management surface v1 with
+  the error model from ADR-0014 (`{error, code}` with a stable enum).
+  redocly lint runs in CI; every test response is validated against the spec
+  with kin-openapi (contract tests); `openapi-typescript` generates
+  `web/src/lib/api/generated.ts`, committed and freshness-checked in CI.
+- Pagination: list endpoints stay unpaginated for v1 (documented in the
+  spec); `audit-events` keeps its `limit` parameter because Audit Events grow
+  without bound.
+
+### Implementation status
+
+Completed:
+
+- `core/internal/testutil` shared harness (unique per-test database, key
+  material, truncate).
+- `app_test.go` split into auth/secrets/fleet/enroll/delivery/smoke test
+  files sharing the harness.
+- Store concurrency and lifecycle tests; two latent store bugs found and
+  fixed (`CreateAdmin` missing unique-violation mapping, `SessionByID`
+  missing no-rows mapping).
+- Unified error envelope with `writeError` and stable codes across all
+  management handlers (ADR-0014).
+- `api/openapi.yaml` (26 operations, response schemas, error model, audit
+  `limit`), redocly lint clean, kin-openapi contract validation wired into
+  the test harness, `web/src/lib/api/generated.ts` generated and committed.
+- `scripts/test-all.sh` + `scripts/coverage_gate.py`; CI updated (PostgreSQL
+  service container, coverage gate, vitest, redocly, type freshness).
+
+Deferred (explicit):
+
+- testcontainers-go automatic container startup (module proxy unreachable
+  during this session; hook documented in `testutil`).
+- Web migration of hand-written API types onto `generated.ts`: blocked on
+  the in-flight frontend refactor; the generated file and freshness check
+  are already in place.
+- Web lint/test/build in the unified script currently fail on the
+  uncommitted in-flight frontend work (Chinese component names); CI runs on
+  clean checkouts and is unaffected.
+
+## Rotatable Secrets (grilled decisions, old-project parity)
+
+Recorded after the session that aligned the Web UI's Secret behavior with
+the legacy personal tool (git.kmou424.moe:8443/kmou424/autosecrets):
+
+- Landing path parity: Materialized Bundles default to `~/.autosecrets` in
+  the invoking user's home, exactly like the legacy tool (the `--bundle-dir`
+  argument / `bundle_dir` request field overrides; "~" expands to the sudo
+  caller's home). Agent identity stays in `/var/lib/autosecrets-agent/`.
+- Core-driven rotation: a Secret's versions are its candidate list. Nodes
+  keep the value they already activated across ordinary Publish cycles
+  (never disturbed while still a candidate). An explicit rotate
+  (`POST /secrets/{id}/rotate`, "下一候选" in the UI) marks the next
+  candidate as the pending target; nodes are forced onto it on the next
+  poll, then keep-old-value resumes. Rotation targets persist in
+  `secret_rotations` (migration 0002).
+- Web UI: per-Secret "下一候选" button (visible once a Secret has multiple
+  versions) and an optional deployment-path input on the Add Server card.
+
+### Implementation status
+
+Completed: store queries (`RevisionVersionMap`, `SecretVersionSeqs`,
+`SecretAppEnv`, `MarkRotation`, `PendingRotation`), delivery keep-old-value
+and forced-rotation logic, rotate endpoint with audit, migration 0002,
+OpenAPI contract + generated types, Web UI controls, Go tests
+(keep/force lifecycle, validation) and contract tests all green.
