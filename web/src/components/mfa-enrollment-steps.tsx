@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import QRCode from "qrcode";
 import {
   useConfirmMFAEnrollment,
   useVerifyMFAEnrollment,
@@ -26,12 +27,25 @@ export function MFAEnrollmentSteps({
 }) {
   const [verified, setVerified] = useState<{ confirmation_token: string; recovery_codes: string[] } | null>(null);
   const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [qrUrl, setQrUrl] = useState("");
   const verify = useVerifyMFAEnrollment();
   const confirm = useConfirmMFAEnrollment();
   const verifyForm = useForm<MFAVerifyForm>({
     resolver: zodResolver(mfaVerifySchema),
     mode: "onChange",
   });
+
+  useEffect(() => {
+    let active = true;
+    QRCode.toDataURL(enrollment.totp_uri, { width: 200, margin: 1 })
+      .then((url) => {
+        if (active) setQrUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [enrollment.totp_uri]);
 
   if (verified) {
     return (
@@ -80,9 +94,20 @@ export function MFAEnrollmentSteps({
       <p className="text-sm opacity-70">
         在身份验证器中添加以下 TOTP 条目（用户名：{enrollment.username}），然后输入当前 6 位动态码。
       </p>
-      <code className="block break-all rounded border p-3 text-xs opacity-80">
-        {enrollment.totp_uri}
-      </code>
+      {qrUrl ? (
+        <img
+          src={qrUrl}
+          alt="TOTP 二维码"
+          className="h-48 w-48 rounded border bg-white p-2"
+          data-testid="totp-qr"
+        />
+      ) : (
+        <div className="h-48 w-48 animate-pulse rounded border bg-muted" />
+      )}
+      <details className="text-xs opacity-70">
+        <summary>无法扫码？手动输入</summary>
+        <code className="mt-1 block break-all rounded border p-2">{enrollment.totp_uri}</code>
+      </details>
       <form onSubmit={verifyForm.handleSubmit((values) =>
         verify.mutate(
           { enrollment_token: enrollment.enrollment_token, totp_code: values.totp_code },
