@@ -87,7 +87,7 @@ export function AppsPage() {
       )}
       {apps.items.length > 0 && (
         <>
-          <Table variant="card">
+          <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>名称</TableHead>
