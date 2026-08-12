@@ -63,7 +63,7 @@ func (a *App) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	now := a.now()
 	err = a.store.StartBootstrapEnrollment(r.Context(), crypto.HashToken(body.Code), strings.TrimSpace(body.OrganizationName),
 		memberID, body.Username, passwordHash, crypto.HashToken(enrollmentToken), wrappedKey, nonces, ciphertext,
-		now.Add(mfaEnrollmentTTL), store.AuditEvent{
+		now.Add(mfaEnrollmentTTL), now, store.AuditEvent{
 			Actor: "bootstrap", Action: "member.bootstrap_started", Resource: memberID,
 			Result: "pending_mfa", CorrelationID: a.correlationID(r),
 		})

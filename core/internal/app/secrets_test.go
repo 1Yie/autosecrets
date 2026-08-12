@@ -103,4 +103,23 @@ func TestAuthoringFlow(t *testing.T) {
 	}
 }
 
+// TestEmptyEnvironmentDraftIsAnEmptyState locks the empty-environment
+// experience: an Environment without Secrets returns an empty Draft (not a
+// 404), so the authoring page never shows a misleading error.
+func TestEmptyEnvironmentDraftIsAnEmptyState(t *testing.T) {
+	ta := newTestApp(t)
+	a := ta.authoringSetup(t)
+	draft := ta.do(t, "GET", "/api/v1/applications/"+a.appID+"/environments/"+a.envID+"/draft",
+		nil, a.cookie, "")
+	if draft.status != http.StatusOK {
+		t.Fatalf("empty environment draft must be 200: %d %s", draft.status, draft.raw)
+	}
+	if draft.body["version"] != float64(0) {
+		t.Fatalf("empty draft version: %s", draft.raw)
+	}
+	if selections, ok := draft.body["selections"].([]any); !ok || len(selections) != 0 {
+		t.Fatalf("empty draft selections: %s", draft.raw)
+	}
+}
+
 func fmtInt(n float64) string { return strconv.FormatInt(int64(n), 10) }

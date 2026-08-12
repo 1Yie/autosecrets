@@ -402,6 +402,14 @@ func (a *App) handleGetDraft(w http.ResponseWriter, r *http.Request) {
 	appID, envID := r.PathValue("appID"), r.PathValue("envID")
 	draft, err := a.store.GetDraft(r.Context(), appID, envID)
 	if err != nil {
+		if errors.Is(err, errNotFound) {
+			// An Environment without Secrets yet has no Draft row; present
+			// the empty state instead of a misleading 404.
+			writeJSON(w, http.StatusOK, map[string]any{
+				"version": 0, "selections": []any{},
+			})
+			return
+		}
 		writeError(w, http.StatusNotFound, "not_found", "application or environment not found")
 		return
 	}

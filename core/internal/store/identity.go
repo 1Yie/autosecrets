@@ -97,7 +97,7 @@ type MFAEnrollment struct {
 // independently issued Bootstrap Codes from producing two first members.
 func (s *Store) StartBootstrapEnrollment(ctx context.Context, codeHash, organizationName,
 	memberID, username, passwordHash, enrollmentTokenHash string,
-	wrappedKey, nonces, ciphertext []byte, expiresAt time.Time, audit AuditEvent) error {
+	wrappedKey, nonces, ciphertext []byte, expiresAt, now time.Time, audit AuditEvent) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -113,8 +113,8 @@ func (s *Store) StartBootstrapEnrollment(ctx context.Context, codeHash, organiza
 	if members > 0 {
 		return ErrConflict
 	}
-	tag, err := tx.Exec(ctx, `UPDATE bootstrap_codes SET used_at = now()
-		WHERE code_hash = $1 AND used_at IS NULL AND expires_at > now()`, codeHash)
+	tag, err := tx.Exec(ctx, `UPDATE bootstrap_codes SET used_at = $2
+		WHERE code_hash = $1 AND used_at IS NULL AND expires_at > $2`, codeHash, now)
 	if err != nil {
 		return err
 	}
