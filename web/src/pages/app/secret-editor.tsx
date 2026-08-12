@@ -5,8 +5,7 @@ import { useCreateSecret } from "../../hooks/applications/use-create-secret";
 import { secretSchema, type SecretForm } from "../../lib/constants/schemas";
 import { BindingRow } from "./binding-row";
 import { Skeleton } from "../../components/ui/skeleton";
-import { RotateButton } from "./rotate-button";
-import { useRotateSecret } from "../../hooks/applications/use-rotate-secret";
+import { UpdateValueButton } from "./update-value-button";
 import { DraftPanel } from "./draft-panel";
 import { RevisionsPanel } from "./revisions-panel";
 import { ErrorBoundary } from "../../components/error-boundary";
@@ -53,7 +52,7 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
             <TableHead className="p-2">名称</TableHead>
             <TableHead className="p-2">Binding</TableHead>
             <TableHead className="p-2">Version</TableHead>
-            <TableHead className="p-2">Rotate</TableHead>
+            <TableHead className="p-2">更新</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -67,10 +66,7 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
                 {s.selected_version}/{s.latest_version}
               </TableCell>
               <TableCell className="p-2">
-                <RotateButton secret={s} appId={appId} envId={envId} />
-                {s.latest_version > 1 && (
-                  <RotateNextButton secretId={s.id} appId={appId} envId={envId} />
-                )}
+                <UpdateValueButton secret={s} appId={appId} envId={envId} />
               </TableCell>
             </TableRow>
           ))}
@@ -84,26 +80,5 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
         <RevisionsPanel appId={appId} envId={envId} />
       </ErrorBoundary>
     </div>
-  );
-}
-
-/** Rotates the Secret to its next candidate version (old-project style). */
-function RotateNextButton({ secretId, appId, envId }: {
-  secretId: string;
-  appId: string;
-  envId: string;
-}) {
-  const rotate = useRotateSecret(secretId, appId, envId);
-  return (
-    <Button
-      variant="outline"
-      className="ml-1"
-      disabled={rotate.isPending}
-      onClick={() => rotate.mutate()}
-      title="轮换到下一个候选值"
-      data-testid={`rotate-next-${secretId}`}
-    >
-      下一候选
-    </Button>
   );
 }

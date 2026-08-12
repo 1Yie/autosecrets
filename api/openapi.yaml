@@ -557,40 +557,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-  /api/v1/secrets/{secretID}/rotate:
-    post:
-      tags: [Authoring]
-      summary: Rotate a rotatable Secret to its next candidate version
-      description: |
-        Moves the Draft selection to the next candidate version (cyclically)
-        and marks the rotation target. Nodes are forced onto the target on
-        their next poll; afterwards keep-old-value behavior resumes. A Secret
-        with a single version cannot rotate.
-      parameters:
-        - $ref: "#/components/parameters/SecretID"
-      responses:
-        "200":
-          description: Rotation target selected in the Draft
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [version_seq, draft_version]
-                properties:
-                  version_seq:
-                    type: integer
-                    format: int64
-                  draft_version:
-                    type: integer
-                    format: int64
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          $ref: "#/components/responses/Conflict"
   /api/v1/secrets/{secretID}/binding:
     put:
       operationId: updateBinding

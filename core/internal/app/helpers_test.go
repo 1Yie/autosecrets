@@ -7,6 +7,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -263,6 +264,60 @@ func tokenFromCommand(command string) string {
 		}
 	}
 	return ""
+}
+
+func secretPayloadValue(t *testing.T, plaintext []byte) string {
+	t.Helper()
+	var payload struct {
+		Files []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(plaintext, &payload); err != nil {
+		t.Fatal(err)
+	}
+	content, _ := base64.StdEncoding.DecodeString(payload.Files[0].Content)
+	return string(content)
+}
+
+func (ta *testApp) addVersion(t *testing.T, a authoring, secretID, value string) int64 {
+	t.Helper()
+	res := ta.do(t, "POST", "/api/v1/secrets/"+secretID+"/versions",
+		map[string]string{"value": value}, a.cookie, a.csrf)
+	if res.status != 201 {
+		t.Fatalf("add version: %d %s", res.status, res.raw)
+	}
+	return int64(res.body["seq"].(float64))
+}
+
+func (ta *testApp) publish(t *testing.T, a authoring) string {
+	t.Helper()
+	res := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments/"+a.envID+"/publish",
+		reason("maintenance", "publish the current draft"), a.cookie, a.csrf)
+	if res.status != 201 {
+		t.Fatalf("publish: %d %s", res.status, res.raw)
+	}
+	return res.body["id"].(string)
+}
+
+// publishAndAssign publishes and creates a Bundle Assignment for the group;
+// the Assignment follows the Bundle's Desired Revision automatically.
+func (ta *testApp) publishAndAssign(t *testing.T, a authoring, groupID string) string {
+	t.Helper()
+	revID := ta.publish(t, a)
+	as := ta.do(t, "POST", "/api/v1/assignments", assignBody(a, groupID), a.cookie, a.csrf)
+	if as.status != 201 {
+		t.Fatalf("assign: %d %s", as.status, as.raw)
+	}
+	return revID
+}
+
+func (ta *testApp) enrolledNode(t *testing.T, a authoring, name string) (nodeIdentity, string) {
+	t.Helper()
+	command := ta.installCommand(t, a.cookie, a.csrf, name)
+	node := ta.enrollNode(t, tokenFromCommand(command), name)
+	return node, node.nodeID
 }
 
 func (ta *testApp) doAgent(t *testing.T, method, path, serial string, body any) result {

@@ -107,35 +107,6 @@ func (a *App) buildEnvelope(r *http.Request, node *store.Node, revisionID string
 	if err != nil {
 		return nil, err
 	}
-	// Rotatable keep-old-value: derive which Secret Versions the node
-	// currently has activated from its observed revision, so a Publish that
-	// reselects a candidate does not disturb a value still in use. Only
-	// Secrets with more than one version behave this way (single-version
-	// Secrets always follow the revision).
-	observed := map[string]int64{}
-	if node.ObservedRevision != "" {
-		if m, err := a.store.RevisionVersionMap(r.Context(), node.ObservedRevision); err == nil {
-			observed = m
-		}
-	}
-	candidates := map[string][]int64{}
-	hasCandidates := func(secretID string) []int64 {
-		seqs, ok := candidates[secretID]
-		if !ok {
-			seqs, _ = a.store.SecretVersionSeqs(r.Context(), secretID)
-			candidates[secretID] = seqs
-		}
-		return seqs
-	}
-	rotated := map[string]int64{}
-	hasPendingRotation := func(secretID string) int64 {
-		if seq, ok := rotated[secretID]; ok {
-			return seq
-		}
-		seq, _ := a.store.PendingRotation(r.Context(), secretID)
-		rotated[secretID] = seq
-		return seq
-	}
 	type payloadFile struct {
 		Path    string `json:"path"`
 		Mode    string `json:"mode"`
@@ -150,19 +121,10 @@ func (a *App) buildEnvelope(r *http.Request, node *store.Node, revisionID string
 	}{AppID: appID, EnvID: envID, Files: []payloadFile{}}
 	manifestFiles := []envelope.FileSpec{}
 	for _, f := range files {
-		seq := f.VersionSeq
-		// A pending rotation forces the target version; once the node has
-		// converged to it (observed == target) keep-old-value resumes.
-		if target := hasPendingRotation(f.SecretID); target != 0 &&
-			target == f.VersionSeq && observed[f.SecretID] != target {
-			// forced switch: use the rotation target from the revision
-		} else if observedSeq, ok := observed[f.SecretID]; ok {
-			seqs := hasCandidates(f.SecretID)
-			if len(seqs) > 1 && containsSeq(seqs, observedSeq) {
-				seq = observedSeq // keep the value the node is already using
-			}
-		}
-		wrapped, nonces, ct, err := a.store.SecretVersionBlob(r.Context(), f.SecretID, seq)
+		// The published Revision freezes exactly which Secret Version each
+		// node must activate; nodes always converge to it (product decision
+		// 2026-08: no cyclic candidate semantics).
+		wrapped, nonces, ct, err := a.store.SecretVersionBlob(r.Context(), f.SecretID, f.VersionSeq)
 		if err != nil {
 			return nil, err
 		}
@@ -205,15 +167,6 @@ func (a *App) buildEnvelope(r *http.Request, node *store.Node, revisionID string
 		Signer:       a.signer.PrivateKey(),
 		SigningKeyID: a.signer.KeyID(),
 	})
-}
-
-func containsSeq(seqs []int64, target int64) bool {
-	for _, s := range seqs {
-		if s == target {
-			return true
-		}
-	}
-	return false
 }
 
 // nodeFromRequest resolves the Managed Node behind the forwarded client

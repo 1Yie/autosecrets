@@ -3,6 +3,7 @@ import { useAuditEvents, type AuditFilters } from "../../hooks/audit/use-audit-e
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 
 const reasonCategories = ["maintenance", "incident_response", "access_change", "configuration_correction", "other"];
 
@@ -46,21 +47,31 @@ export function AuditPage() {
         <FilterInput label="资源" value={draft.resource} onChange={(v) => setDraft({ ...draft, resource: v })} testId="filter-resource" />
         <label className="flex flex-col gap-1">
           <span className="opacity-60">结果</span>
-          <select className="rounded border px-2 py-1" data-testid="filter-outcome" value={draft.outcome} onChange={(e) => setDraft({ ...draft, outcome: e.target.value })}>
-            <option value="">全部</option>
-            <option value="ok">ok</option>
-            <option value="denied">denied</option>
-            <option value="failed">failed</option>
-          </select>
+          <Select value={draft.outcome || "all"} onValueChange={(v) => setDraft({ ...draft, outcome: v === "all" ? "" : v })}>
+            <SelectTrigger className="w-28" data-testid="filter-outcome">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部</SelectItem>
+              <SelectItem value="ok">ok</SelectItem>
+              <SelectItem value="denied">denied</SelectItem>
+              <SelectItem value="failed">failed</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="opacity-60">原因类别</span>
-          <select className="rounded border px-2 py-1" data-testid="filter-reason" value={draft.reason_category} onChange={(e) => setDraft({ ...draft, reason_category: e.target.value })}>
-            <option value="">全部</option>
-            {reasonCategories.map((category) => (
-              <option key={category} value={category}>{category}</option>
-            ))}
-          </select>
+          <Select value={draft.reason_category || "all"} onValueChange={(v) => setDraft({ ...draft, reason_category: v === "all" ? "" : v })}>
+            <SelectTrigger className="w-40" data-testid="filter-reason">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部</SelectItem>
+              {reasonCategories.map((category) => (
+                <SelectItem key={category} value={category}>{category}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
         <Button variant="default" size="sm" type="submit">
           应用筛选

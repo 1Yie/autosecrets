@@ -278,60 +278,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/secrets/{secretID}/rotate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rotate a rotatable Secret to its next candidate version
-         * @description Moves the Draft selection to the next candidate version (cyclically)
-         *     and marks the rotation target. Nodes are forced onto the target on
-         *     their next poll; afterwards keep-old-value behavior resumes. A Secret
-         *     with a single version cannot rotate.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description Secret id (UUID) */
-                    secretID: components["parameters"]["SecretID"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rotation target selected in the Draft */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** Format: int64 */
-                            version_seq: number;
-                            /** Format: int64 */
-                            draft_version: number;
-                        };
-                    };
-                };
-                400: components["responses"]["BadRequest"];
-                403: components["responses"]["Forbidden"];
-                404: components["responses"]["NotFound"];
-                409: components["responses"]["Conflict"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/secrets/{secretID}/binding": {
         parameters: {
             query?: never;

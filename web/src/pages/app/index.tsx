@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { Controller } from "react-hook-form";
 import { useApplication } from "../../hooks/applications/use-application";
 import { useCreateEnvironment } from "../../hooks/applications/use-create-environment";
 import { SecretEditor } from "./secret-editor";
@@ -11,6 +12,7 @@ import { z } from "zod";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
 
 const envSchema = z.object({
   name: nameSchema,
@@ -22,7 +24,7 @@ export function AppPage() {
   const app = useApplication(appId ?? "");
   const createEnv = useCreateEnvironment(appId ?? "");
   const [activeEnv, setActiveEnv] = useState<string | null>(null);
-  const { register, handleSubmit, reset } = useForm<{ name: string; protection: "standard" | "protected" }>({
+  const { register, handleSubmit, reset, control } = useForm<{ name: string; protection: "standard" | "protected" }>({
     resolver: zodResolver(envSchema),
     defaultValues: { protection: "standard" },
   });
@@ -60,10 +62,21 @@ export function AppPage() {
           })}
         >
           <Input className="" placeholder="新环境" {...register("name")} />
-          <select className="rounded border px-2 text-sm" data-testid="env-protection" {...register("protection")}>
-            <option value="standard">standard</option>
-            <option value="protected">protected</option>
-          </select>
+          <Controller
+            name="protection"
+            control={control}
+            render={({ field }) => (
+              <Select value={field.value} onValueChange={field.onChange}>
+                <SelectTrigger className="w-28" data-testid="env-protection">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="standard">standard</SelectItem>
+                  <SelectItem value="protected">protected</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          />
           <Button variant="outline"  type="submit">+</Button>
         </form>
       </div>

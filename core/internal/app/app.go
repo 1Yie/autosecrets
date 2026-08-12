@@ -121,7 +121,6 @@ func (a *App) Handler() http.Handler {
 	mux.Handle("GET "+a.managementBase+"/applications/{appID}/environments/{envID}/secrets", a.requireSession(http.HandlerFunc(a.handleListSecrets)))
 	mux.Handle("POST "+a.managementBase+"/applications/{appID}/environments/{envID}/secrets", a.requireSession(http.HandlerFunc(a.handleCreateSecret)))
 	mux.Handle("POST "+a.managementBase+"/secrets/{secretID}/versions", a.requireSession(http.HandlerFunc(a.handleCreateSecretVersion)))
-	mux.Handle("POST "+a.managementBase+"/secrets/{secretID}/rotate", a.requireSession(http.HandlerFunc(a.handleRotateSecret)))
 	mux.Handle("PUT "+a.managementBase+"/secrets/{secretID}/binding", a.requireSession(http.HandlerFunc(a.handleUpdateBinding)))
 	mux.Handle("GET "+a.managementBase+"/applications/{appID}/environments/{envID}/draft", a.requireSession(http.HandlerFunc(a.handleGetDraft)))
 	mux.Handle("PUT "+a.managementBase+"/applications/{appID}/environments/{envID}/draft", a.requireSession(http.HandlerFunc(a.handleUpdateDraft)))

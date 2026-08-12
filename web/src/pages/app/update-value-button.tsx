@@ -3,15 +3,15 @@ import { useCreateVersion } from "../../hooks/applications/use-create-version";
 import type { SecretRow } from "../../hooks/applications/use-secrets";
 import { Button } from "../../components/ui/button";
 
-interface RotateButtonProps {
+interface UpdateValueButtonProps {
   secret: SecretRow;
   appId: string;
   envId: string;
 }
 
 /** Single-field transient input; the guide allows useState for this. */
-export function RotateButton({ secret, appId, envId }: RotateButtonProps) {
-  const rotate = useCreateVersion(secret.id, appId, envId);
+export function UpdateValueButton({ secret, appId, envId }: UpdateValueButtonProps) {
+  const updateValue = useCreateVersion(secret.id, appId, envId);
   const [value, setValue] = useState("");
 
   return (
@@ -21,17 +21,17 @@ export function RotateButton({ secret, appId, envId }: RotateButtonProps) {
         placeholder="新值"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        data-testid={`rotate-${secret.name}`}
+        data-testid={`update-${secret.name}`}
       />
       <Button variant="outline"
         
-        disabled={!value || rotate.isPending}
+        disabled={!value || updateValue.isPending}
         onClick={() => {
-          rotate.mutate(value);
+          updateValue.mutate(value);
           setValue("");
         }}
       >
-        轮换
+        更新值
       </Button>
     </span>
   );

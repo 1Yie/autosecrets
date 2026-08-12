@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { useSearch, type SearchResult } from "../hooks/fleet/use-search";
+import { Input } from "./ui/input";
 
 const typeLabels: Record<SearchResult["type"], string> = {
   application: "应用",
@@ -28,8 +29,8 @@ export function SearchBox() {
     <div className="relative">
       <div className="relative">
         <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 opacity-50" />
-        <input
-          className="w-56 rounded-md border bg-background py-1 pl-7 pr-2 text-sm"
+        <Input
+          className="w-56 pl-7"
           placeholder="搜索…"
           value={query}
           data-testid="global-search"

@@ -927,48 +927,6 @@ func (s *Store) RevisionFiles(ctx context.Context, revisionID string) ([]Revisio
 	return out, rows.Err()
 }
 
-// RevisionVersionMap returns the secret→version selection frozen in a
-// Bundle Revision. Core uses it to derive which Secret Version a node
-// currently has activated (the node reports only the revision id).
-func (s *Store) RevisionVersionMap(ctx context.Context, revisionID string) (map[string]int64, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT secret_id, version_seq FROM revision_files WHERE revision_id = $1`, revisionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]int64{}
-	for rows.Next() {
-		var secretID string
-		var seq int64
-		if err := rows.Scan(&secretID, &seq); err != nil {
-			return nil, err
-		}
-		out[secretID] = seq
-	}
-	return out, rows.Err()
-}
-
-// SecretVersionSeqs lists the version sequences of a Secret in ascending
-// order. Rotatable rotation walks this list cyclically.
-func (s *Store) SecretVersionSeqs(ctx context.Context, secretID string) ([]int64, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT seq FROM secret_versions WHERE secret_id = $1 ORDER BY seq`, secretID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []int64{}
-	for rows.Next() {
-		var seq int64
-		if err := rows.Scan(&seq); err != nil {
-			return nil, err
-		}
-		out = append(out, seq)
-	}
-	return out, rows.Err()
-}
-
 // RevisionAppEnv returns the Application and Environment IDs of a revision.
 func (s *Store) RevisionAppEnv(ctx context.Context, revisionID string) (appID, envID string, err error) {
 	err = s.pool.QueryRow(ctx,
@@ -993,28 +951,4 @@ func (s *Store) SecretAppEnv(ctx context.Context, secretID string) (appID, envID
 		`SELECT application_id, environment_id FROM secrets WHERE id = $1`, secretID).
 		Scan(&appID, &envID)
 	return appID, envID, mapNoRows(err)
-}
-
-// MarkRotation records that an Administrator rotated a Secret to the given
-// version. The newest row is the pending rotation target for that Secret.
-func (s *Store) MarkRotation(ctx context.Context, secretID string, versionSeq int64) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO secret_rotations (secret_id, version_seq) VALUES ($1, $2)`,
-		secretID, versionSeq)
-	return err
-}
-
-// PendingRotation returns the most recent rotation target for a Secret, or
-// 0 when the Secret was never rotated. Nodes are forced onto the target
-// until they have converged to it.
-func (s *Store) PendingRotation(ctx context.Context, secretID string) (int64, error) {
-	var seq int64
-	err := s.pool.QueryRow(ctx,
-		`SELECT version_seq FROM secret_rotations
-		 WHERE secret_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`, secretID).
-		Scan(&seq)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, nil
-	}
-	return seq, err
 }
