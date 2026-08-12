@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiPost } from "../../lib/api";
 import { API_PATHS } from "../../lib/constants/api-paths";
+import type { OperationReasonForm } from "../../lib/constants/schemas";
 
 export interface Application { id: string; name: string; created_at: string; }
 export interface Environment { id: string; name: string; application_id: string; }
@@ -14,10 +15,23 @@ export interface RevisionRef { revision_id: string; label: string; }
 export function usePublish(appId: string, envId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiPost<Revision>(API_PATHS.publish(appId, envId)),
+    mutationFn: (reason: OperationReasonForm) =>
+      apiPost<Revision>(API_PATHS.publish(appId, envId), { operation_reason: reason }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["draft", appId, envId] });
       qc.invalidateQueries({ queryKey: ["revisions", appId, envId] });
+    },
+  });
+}
+
+export function useRollback(appId: string, envId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { source_revision_id: string; operation_reason: OperationReasonForm }) =>
+      apiPost<Revision>(API_PATHS.rollback(appId, envId), body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["revisions", appId, envId] });
+      qc.invalidateQueries({ queryKey: ["draft", appId, envId] });
     },
   });
 }

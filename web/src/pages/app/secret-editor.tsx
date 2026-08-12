@@ -2,9 +2,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useSecrets } from "../../hooks/applications/use-secrets";
 import { useCreateSecret } from "../../hooks/applications/use-create-secret";
-import { useDraft } from "../../hooks/applications/use-draft";
-import { usePublish } from "../../hooks/applications/use-publish";
-import { useRevisions } from "../../hooks/applications/use-revisions";
 import { secretSchema, type SecretForm } from "../../lib/constants/schemas";
 import { BindingRow } from "./binding-row";
 import { Skeleton } from "../../components/ui/skeleton";
@@ -25,9 +22,6 @@ interface SecretEditorProps {
 export function SecretEditor({ appId, envId }: SecretEditorProps) {
   const secrets = useSecrets(appId, envId);
   const create = useCreateSecret(appId, envId);
-  const draft = useDraft(appId, envId);
-  const publish = usePublish(appId, envId);
-  const revisions = useRevisions(appId, envId);
   const { register, handleSubmit, reset, formState: { errors } } =
     useForm<SecretForm>({ resolver: zodResolver(secretSchema) });
 
@@ -84,10 +78,10 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
       </Table>
 
       <ErrorBoundary>
-        <DraftPanel draft={draft} publish={publish} />
+        <DraftPanel appId={appId} envId={envId} />
       </ErrorBoundary>
       <ErrorBoundary>
-        <RevisionsPanel revisions={revisions} />
+        <RevisionsPanel appId={appId} envId={envId} />
       </ErrorBoundary>
     </div>
   );

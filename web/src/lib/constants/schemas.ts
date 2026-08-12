@@ -35,6 +35,18 @@ export const stepUpSchema = z.object({
   password: z.string().min(1, "请输入当前密码"),
 });
 
+export const operationReasonSchema = z.object({
+  category: z.enum(
+    ["maintenance", "incident_response", "access_change", "configuration_correction", "other"],
+    { message: "请选择原因类别" },
+  ),
+  explanation: z
+    .string()
+    .min(10, "说明至少 10 个字符")
+    .max(500, "说明最多 500 个字符"),
+  external_ref: z.string().max(128, "外部引用最多 128 个字符").optional().or(z.literal("")),
+});
+
 export const nameSchema = z
   .string()
   .trim()
@@ -70,5 +82,6 @@ export type BootstrapForm = z.infer<typeof bootstrapSchema>;
 export type LoginForm = z.infer<typeof loginSchema>;
 export type MFAVerifyForm = z.infer<typeof mfaVerifySchema>;
 export type StepUpForm = z.infer<typeof stepUpSchema>;
+export type OperationReasonForm = z.infer<typeof operationReasonSchema>;
 export type SecretForm = z.infer<typeof secretSchema>;
 export type BindingForm = z.infer<typeof bindingSchema>;

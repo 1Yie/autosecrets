@@ -71,6 +71,57 @@ export const handlers = [
     }),
   ),
   http.get("/api/v1/audit-events", () => HttpResponse.json([])),
+  http.get("/api/v1/applications/:appId/environments/:envId/draft", () =>
+    HttpResponse.json({
+      version: 3,
+      selections: [
+        {
+          secret_id: "secret-1",
+          name: "db_pass",
+          version_seq: 2,
+          binding: { path: "db_pass", uid: 0, gid: 0, mode: "0400" },
+        },
+      ],
+    }),
+  ),
+  http.get("/api/v1/applications/:appId/environments/:envId/revisions", () =>
+    HttpResponse.json([
+      {
+        id: "rev-1",
+        draft_version: 3,
+        file_count: 1,
+        created_by: "admin:admin",
+        created_at: "2026-08-12T12:00:00Z",
+        operation_reason: { category: "maintenance", explanation: "rotate the database password" },
+      },
+    ]),
+  ),
+  http.post("/api/v1/applications/:appId/environments/:envId/publish", () =>
+    HttpResponse.json(
+      {
+        id: "rev-2",
+        draft_version: 3,
+        file_count: 1,
+        created_by: "admin:admin",
+        created_at: "2026-08-12T12:01:00Z",
+        operation_reason: { category: "maintenance", explanation: "rotate the database password" },
+      },
+      { status: 201 },
+    ),
+  ),
+  http.post("/api/v1/applications/:appId/environments/:envId/rollback", () =>
+    HttpResponse.json(
+      {
+        id: "rev-3",
+        draft_version: 1,
+        file_count: 1,
+        created_by: "admin:admin",
+        created_at: "2026-08-12T12:02:00Z",
+        operation_reason: { category: "incident_response", explanation: "restore the previous working state" },
+      },
+      { status: 201 },
+    ),
+  ),
 ];
 
 export const server = setupServer(...handlers);

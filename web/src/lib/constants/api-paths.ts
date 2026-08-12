@@ -23,6 +23,8 @@ export const API_PATHS = {
     `/api/v1/applications/${appId}/environments/${envId}/draft`,
   publish: (appId: string, envId: string) =>
     `/api/v1/applications/${appId}/environments/${envId}/publish`,
+  rollback: (appId: string, envId: string) =>
+    `/api/v1/applications/${appId}/environments/${envId}/rollback`,
   revisions: (appId: string, envId: string) =>
     `/api/v1/applications/${appId}/environments/${envId}/revisions`,
   nodeGroups: "/api/v1/node-groups",

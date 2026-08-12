@@ -5,9 +5,11 @@ import { useSessionStore } from "../stores/session-store";
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code: string;
+  constructor(status: number, code: string, message: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -37,11 +39,10 @@ export async function api<T = unknown>(
     data = text;
   }
   if (!res.ok) {
-    const message =
-      data && typeof data === "object" && "error" in (data as object)
-        ? String((data as { error: string }).error)
-        : `HTTP ${res.status}`;
-    throw new ApiError(res.status, message);
+    const body = data && typeof data === "object" ? (data as { error?: string; code?: string }) : null;
+    const message = body?.error ?? `HTTP ${res.status}`;
+    const code = body?.code ?? "unknown";
+    throw new ApiError(res.status, code, message);
   }
   return data as T;
 }
