@@ -41,9 +41,8 @@ func TestActivationPolicyRequiredBeforeAssignment(t *testing.T) {
 	}
 	okPolicy := ta.do(t, "PUT", policyPath(a),
 		map[string]any{
-			"units":            []string{"web.service", "web.socket"},
-			"action":           "restart",
-			"operation_reason": map[string]string{"category": "maintenance", "explanation": "define the service activation policy"},
+			"units":  []string{"web.service", "web.socket"},
+			"action": "restart",
 		}, a.cookie, a.csrf)
 	if okPolicy.status != http.StatusOK {
 		t.Fatalf("activation policy: %d %s", okPolicy.status, okPolicy.raw)

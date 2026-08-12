@@ -721,7 +721,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [operation_reason]
+              required: []
               properties:
                 operation_reason:
                   $ref: "#/components/schemas/OperationReason"
@@ -752,7 +752,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [source_revision_id, operation_reason]
+              required: [source_revision_id]
               properties:
                 source_revision_id:
                   type: string
@@ -911,7 +911,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [group_id, application_id, environment_id, operation_reason]
+              required: [group_id, application_id, environment_id]
               properties:
                 group_id:
                   type: string
@@ -975,7 +975,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [operation_reason]
+              required: []
               properties:
                 operation_reason:
                   $ref: "#/components/schemas/OperationReason"
@@ -1018,7 +1018,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [operation_reason]
+              required: []
               properties:
                 operation_reason:
                   $ref: "#/components/schemas/OperationReason"
@@ -1602,7 +1602,6 @@ components:
           enum: [maintenance, incident_response, access_change, configuration_correction, other]
         explanation:
           type: string
-          minLength: 10
           maxLength: 500
         external_ref:
           type: string

@@ -1652,7 +1652,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    operation_reason: components["schemas"]["OperationReason"];
+                    operation_reason?: components["schemas"]["OperationReason"];
                 };
             };
         };
@@ -1687,7 +1687,7 @@ export interface operations {
             content: {
                 "application/json": {
                     source_revision_id: string;
-                    operation_reason: components["schemas"]["OperationReason"];
+                    operation_reason?: components["schemas"]["OperationReason"];
                 };
             };
         };
@@ -1879,7 +1879,7 @@ export interface operations {
                     group_id: string;
                     application_id: string;
                     environment_id: string;
-                    operation_reason: components["schemas"]["OperationReason"];
+                    operation_reason?: components["schemas"]["OperationReason"];
                 };
             };
         };
@@ -1940,7 +1940,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    operation_reason: components["schemas"]["OperationReason"];
+                    operation_reason?: components["schemas"]["OperationReason"];
                 };
             };
         };
@@ -1978,7 +1978,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    operation_reason: components["schemas"]["OperationReason"];
+                    operation_reason?: components["schemas"]["OperationReason"];
                 };
             };
         };

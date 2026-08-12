@@ -64,6 +64,17 @@ func operationReason(body *operationReasonInput) (store.OperationReason, bool) {
 	return store.OperationReason{Category: category, Explanation: explanation, ExternalRef: externalRef}, true
 }
 
+// operationReasonOr returns the validated reason when supplied, or an
+// 'other' default when omitted: Operation Reasons are an operator aid, never
+// a hard gate on publishing (product decision 2026-08). A supplied but
+// malformed reason is still rejected so typos are not silently ignored.
+func operationReasonOr(body *operationReasonInput) (store.OperationReason, bool) {
+	if body == nil {
+		return store.OperationReason{Category: "other"}, true
+	}
+	return operationReason(body)
+}
+
 func modeString(m int64) string { return fmt.Sprintf("%04o", m) }
 
 func (a *App) handleListApplications(w http.ResponseWriter, r *http.Request) {
@@ -475,7 +486,7 @@ func (a *App) handlePublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
 		return
 	}
-	reason, ok := operationReason(body.OperationReason)
+	reason, ok := operationReasonOr(body.OperationReason)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
 		return
@@ -535,7 +546,7 @@ func (a *App) handleRollback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "source_revision_id and operation_reason are required")
 		return
 	}
-	reason, ok := operationReason(body.OperationReason)
+	reason, ok := operationReasonOr(body.OperationReason)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
 		return

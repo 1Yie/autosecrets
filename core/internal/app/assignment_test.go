@@ -92,10 +92,10 @@ func TestAssignmentNodeAmbiguity(t *testing.T) {
 	}
 }
 
-// TestAssignmentRequiresReasonAndProtectedStepUp locks US-232/US-148: every
-// Assignment carries an Operation Reason, and Protected Environments need a
-// current Step-up Grant.
-func TestAssignmentRequiresReasonAndProtectedStepUp(t *testing.T) {
+// TestAssignmentOptionalReasonAndProtectedStepUp locks the risk policy
+// after the 2026-08 product decision: Assignment reasons are optional, and
+// Protected Environments need a current Step-up Grant.
+func TestAssignmentOptionalReasonAndProtectedStepUp(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
 	ta.putPolicy(t, a)
@@ -106,12 +106,8 @@ func TestAssignmentRequiresReasonAndProtectedStepUp(t *testing.T) {
 	noReason := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
 		"group_id": g.body["id"].(string), "application_id": a.appID, "environment_id": a.envID,
 	}, a.cookie, a.csrf)
-	if noReason.status != http.StatusBadRequest {
-		t.Fatalf("assignment without operation reason: %d %s", noReason.status, noReason.raw)
-	}
-	ok := ta.do(t, "POST", "/api/v1/assignments", assignBody(a, g.body["id"].(string)), a.cookie, a.csrf)
-	if ok.status != http.StatusCreated {
-		t.Fatalf("assignment with reason: %d %s", ok.status, ok.raw)
+	if noReason.status != http.StatusCreated {
+		t.Fatalf("assignment without operation reason must succeed: %d %s", noReason.status, noReason.raw)
 	}
 
 	// Protected Environment: assignment requires Step-up.

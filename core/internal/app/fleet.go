@@ -110,7 +110,7 @@ func (a *App) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "group_id, application_id, and environment_id are required")
 		return
 	}
-	reason, ok := operationReason(body.OperationReason)
+	reason, ok := operationReasonOr(body.OperationReason)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
 		return

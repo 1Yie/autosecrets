@@ -1,34 +1,20 @@
 import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
 import { useDraft } from "../../hooks/applications/use-draft";
 import { usePublish } from "../../hooks/applications/use-publish";
-import { operationReasonSchema, type OperationReasonForm } from "../../lib/constants/schemas";
 import { ApiError } from "../../lib/api";
-import { OperationReasonFields } from "../../components/operation-reason-fields";
 import { StepUpPrompt } from "../../components/step-up-prompt";
 import { Button } from "../../components/ui/button";
 
-/** Draft summary plus the Publish flow: every Desired State change needs an
- * Operation Reason; Protected Environments additionally need Step-up. */
+/** Draft summary plus one-click Publish. The server no longer requires an
+ * Operation Reason (product decision 2026-08); Protected Environments still
+ * ask for a Step-up password confirmation when the grant is stale. */
 export function DraftPanel({ appId, envId }: { appId: string; envId: string }) {
   const draft = useDraft(appId, envId);
   const publish = usePublish(appId, envId);
-  const [open, setOpen] = useState(false);
   const [stepUpNeeded, setStepUpNeeded] = useState(false);
-  const form = useForm<OperationReasonForm>({
-    resolver: zodResolver(operationReasonSchema),
-    mode: "onChange",
-    defaultValues: { category: "maintenance", explanation: "", external_ref: "" },
-  });
 
-  const onPublish = (values: OperationReasonForm) => {
-    publish.mutate(values, {
-      onSuccess: () => {
-        setOpen(false);
-        setStepUpNeeded(false);
-        form.reset();
-      },
+  const onPublish = () => {
+    publish.mutate(undefined, {
       onError: (error) => {
         if (error instanceof ApiError && error.code === "step_up_required") {
           setStepUpNeeded(true);
@@ -50,47 +36,25 @@ export function DraftPanel({ appId, envId }: { appId: string; envId: string }) {
         ))}
       </ul>
 
-      {!open ? (
-        <Button variant="default" className="mt-3" disabled={publish.isPending} onClick={() => setOpen(true)}>
-          发布
-        </Button>
-      ) : stepUpNeeded ? (
+      {stepUpNeeded ? (
         <div className="mt-3 space-y-2">
           <StepUpPrompt
             prompt="发布到受保护环境需要密码确认。"
             onGranted={() => {
               setStepUpNeeded(false);
-              void form.handleSubmit(onPublish)();
+              onPublish();
             }}
           />
-          <Button variant="outline" onClick={() => setOpen(false)}>
-            取消
-          </Button>
         </div>
       ) : (
-        <form
-          className="mt-3 space-y-2"
-          onSubmit={form.handleSubmit(onPublish)}
-          data-testid="publish-form"
-        >
-          <p className="text-xs opacity-70">
-            发布后，已分配的节点会在下次轮询时自动同步新版本（通常 15 秒内开始）。
-          </p>
-          <OperationReasonFields register={form.register} errors={form.formState.errors} />
-          {publish.isError && !stepUpNeeded && (
-            <p className="text-sm text-red-500">{String((publish.error as Error).message)}</p>
-          )}
-          <div className="flex gap-2">
-            <Button variant="default" type="submit" disabled={publish.isPending || !form.formState.isValid}>
-          确认发布
-            </Button>
-            <Button variant="outline" type="button" onClick={() => setOpen(false)}>
-              取消
-            </Button>
-          </div>
-        </form>
+        <Button variant="default" className="mt-3" disabled={publish.isPending} onClick={onPublish}>
+          发布
+        </Button>
       )}
-      {publish.isSuccess && !open && (
+      {publish.isError && !stepUpNeeded && (
+        <p className="mt-1 text-sm text-red-500">{String((publish.error as Error).message)}</p>
+      )}
+      {publish.isSuccess && (
         <p className="mt-1 text-sm text-green-600" data-testid="publish-success">
           已更新下发目标版本（{publish.data?.id.slice(0, 8)}…），节点将自动同步
         </p>

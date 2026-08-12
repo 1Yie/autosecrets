@@ -21,18 +21,15 @@ func reason(category, explanation string) map[string]any {
 	}
 }
 
-// TestPublishRequiresReasonAndProtectedStepUp locks the Desired State
-// risk policy: every Publish needs a valid Operation Reason; Protected and
-// Unclassified Environments additionally need a current Step-up Grant.
-func TestPublishRequiresReasonAndProtectedStepUp(t *testing.T) {
+// TestPublishOptionalReasonAndProtectedStepUp locks the risk policy after
+// the 2026-08 product decision: Operation Reason is optional (omitted ->
+// 'other', malformed -> rejected); Protected and Unclassified Environments
+// still need a current Step-up Grant.
+func TestPublishOptionalReasonAndProtectedStepUp(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
 	ta.createSecret(t, a, "db_pass", "v1")
 
-	noReason := ta.do(t, "POST", publishPath(a), map[string]any{}, a.cookie, a.csrf)
-	if noReason.status != http.StatusBadRequest {
-		t.Fatalf("publish without operation reason: %d %s", noReason.status, noReason.raw)
-	}
 	badCategory := ta.do(t, "POST", publishPath(a),
 		reason("emergency", "rotate the database password"), a.cookie, a.csrf)
 	if badCategory.status != http.StatusBadRequest {
@@ -43,13 +40,14 @@ func TestPublishRequiresReasonAndProtectedStepUp(t *testing.T) {
 	if shortExplanation.status != http.StatusBadRequest {
 		t.Fatalf("short reason explanation: %d %s", shortExplanation.status, shortExplanation.raw)
 	}
-	first := ta.do(t, "POST", publishPath(a),
-		reason("maintenance", "rotate the database password"), a.cookie, a.csrf)
-	if first.status != http.StatusCreated {
-		t.Fatalf("publish with reason: %d %s", first.status, first.raw)
+	// Omitted reasons are fine: the publish succeeds with an 'other' default.
+	noReason := ta.do(t, "POST", publishPath(a), map[string]any{}, a.cookie, a.csrf)
+	if noReason.status != http.StatusCreated {
+		t.Fatalf("publish without operation reason must succeed: %d %s", noReason.status, noReason.raw)
 	}
-	if first.body["operation_reason"] == nil {
-		t.Fatalf("published revision must echo its operation reason: %s", first.raw)
+	recorded := noReason.body["operation_reason"].(map[string]any)
+	if recorded["category"] != "other" {
+		t.Fatalf("omitted reason must record the other default: %s", noReason.raw)
 	}
 	unchanged := ta.do(t, "POST", publishPath(a),
 		reason("maintenance", "rotate the database password again"), a.cookie, a.csrf)
@@ -141,8 +139,8 @@ func TestRollbackCreatesNewRevisionFromSnapshot(t *testing.T) {
 
 	noReason := ta.do(t, "POST", rollbackPath(a),
 		map[string]any{"source_revision_id": firstID}, a.cookie, a.csrf)
-	if noReason.status != http.StatusBadRequest {
-		t.Fatalf("rollback without operation reason: %d %s", noReason.status, noReason.raw)
+	if noReason.status != http.StatusCreated {
+		t.Fatalf("rollback without operation reason must succeed: %d %s", noReason.status, noReason.raw)
 	}
 	missing := ta.do(t, "POST", rollbackPath(a),
 		map[string]any{

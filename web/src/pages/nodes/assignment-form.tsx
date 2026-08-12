@@ -1,23 +1,19 @@
 import { Controller, useForm } from "react-hook-form";
-import type { UseFormRegister } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useCreateAssignment } from "../../hooks/fleet/use-create-assignment";
 import { useApplications } from "../../hooks/applications/use-applications";
 import { useApplication } from "../../hooks/applications/use-application";
-import { operationReasonSchema, type OperationReasonForm } from "../../lib/constants/schemas";
 import type { Assignment } from "../../hooks/fleet/use-assignments";
 import type { NodeGroup } from "../../hooks/fleet/use-node-groups";
 import { Button } from "../../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
-import { OperationReasonFields } from "../../components/operation-reason-fields";
 import { Skeleton } from "../../components/ui/skeleton";
 
 const assignmentSchema = z.object({
   group_id: z.string().min(1, "请选择节点组"),
   application_id: z.string().min(1, "请选择应用"),
   environment_id: z.string().min(1, "请选择环境"),
-  operation_reason: operationReasonSchema,
 });
 
 type AssignmentFormValues = z.infer<typeof assignmentSchema>;
@@ -32,14 +28,13 @@ interface AssignmentFormProps {
 export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
   const createAssignment = useCreateAssignment();
   const applications = useApplications();
-  const { control, handleSubmit, reset, watch, setValue, register, formState: { errors, isValid } } =
-    useForm<AssignmentFormValues & { operation_reason: OperationReasonForm }>({
+  const { control, handleSubmit, reset, watch, setValue, formState: { errors, isValid } } =
+    useForm<AssignmentFormValues>({
       resolver: zodResolver(assignmentSchema),
       defaultValues: {
         group_id: "",
         application_id: "",
         environment_id: "",
-        operation_reason: { category: "maintenance", explanation: "", external_ref: "" },
       },
     });
   const appId = watch("application_id");
@@ -107,10 +102,6 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
               </SelectContent>
             </Select>
           )}
-        />
-        <OperationReasonFields
-          register={register as UseFormRegister<OperationReasonForm>}
-          errors={errors.operation_reason}
         />
         <Button type="submit" disabled={createAssignment.isPending || !isValid}>
           分配

@@ -33,7 +33,7 @@ func (a *App) handlePutActivationPolicy(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
 		return
 	}
-	reason, ok := operationReason(body.OperationReason)
+	reason, ok := operationReasonOr(body.OperationReason)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
 		return
@@ -88,7 +88,7 @@ func (a *App) handleUnassign(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
 		return
 	}
-	reason, ok := operationReason(body.OperationReason)
+	reason, ok := operationReasonOr(body.OperationReason)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
 		return
@@ -144,7 +144,7 @@ func (a *App) handleAbandonCleanup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
 		return
 	}
-	reason, ok := operationReason(body.OperationReason)
+	reason, ok := operationReasonOr(body.OperationReason)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
 		return
