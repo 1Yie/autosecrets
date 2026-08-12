@@ -10,7 +10,6 @@ import type { ManagedNode } from "../../hooks/fleet/use-nodes";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Button } from "../../components/ui/button";
-import { Frame, FrameFooter } from "../../components/ui/frame";
 import { StatusBadge } from "../../components/status-badge";
 
 export function NodesPage() {
@@ -30,24 +29,22 @@ export function NodesPage() {
         {nodes.isLoading && <Skeleton className="h-24 w-full" />}
         {nodes.isError && <p className="text-sm text-red-500">节点列表加载失败</p>}
         {nodes.items.length > 0 && (
-          <Frame className="mt-2 w-full">
+          <>
             <NodeTable nodes={nodes.items} />
-            <FrameFooter className="p-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-muted-foreground text-sm">
-                  共 <strong className="font-medium text-foreground">{nodes.items.length}</strong> 个节点
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" disabled={nodes.isFirstPage} onClick={nodes.prev}>
-                    上一页
-                  </Button>
-                  <Button variant="outline" size="sm" disabled={!nodes.nextCursor} onClick={nodes.next}>
-                    下一页
-                  </Button>
-                </div>
+            <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+              <p className="text-muted-foreground">
+                共 <strong className="font-medium text-foreground">{nodes.items.length}</strong> 个节点
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={nodes.isFirstPage} onClick={nodes.prev}>
+                  上一页
+                </Button>
+                <Button variant="outline" size="sm" disabled={!nodes.nextCursor} onClick={nodes.next}>
+                  下一页
+                </Button>
               </div>
-            </FrameFooter>
-          </Frame>
+            </div>
+          </>
         )}
       </section>
 
