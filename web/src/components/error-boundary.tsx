@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Button } from "./ui/button";
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -29,12 +30,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           <div className="rounded border border-red-500/40 bg-red-500/10 p-4 text-sm">
             <p className="font-semibold text-red-500">页面出错了</p>
             <p className="mt-1 opacity-80">{this.state.error.message}</p>
-            <button
-              className="mt-3 rounded border px-3 py-1"
+            <Button variant="outline" className="mt-3"
+              
               onClick={() => this.setState({ error: null })}
             >
               重试
-            </button>
+            </Button>
           </div>
         )
       );

@@ -26,8 +26,8 @@ The Web application uses React and TypeScript. These rules apply to all frontend
 ## UI and styling
 
 - Use Tailwind CSS for styling. Do not add CSS Modules or styled-components.
-- Use [Watermelon UI](https://ui.watermelon.sh/home) as the primary component and block registry.
-- Install Watermelon UI source through its documented shadcn registry URLs and treat the copied source as project-owned code subject to the same typing, accessibility, security, and testing rules.
+- Use [Watermelon UI](https://ui.watermelon.sh/components) as the primary component and block registry. Components install through the shadcn CLI from `https://registry.watermelon.sh/r/<name>.json`; the numbered variant manifests (e.g. `button-1.json`) pull the full Watermelon implementation for a component, so verify the installed source carries the library styling (e.g. `active:translate-y-px` on buttons) rather than the plain shadcn fallback.
+- Do not override component geometry on usage sites: className on `Button`, `Input`, `SelectTrigger`, and `Textarea` carries layout only (width, spacing, font). Radii, borders, and padding belong to the components so every control stays visually unified (`rounded-lg` across controls).
 - Use shadcn/ui only for foundational primitives that Watermelon UI does not provide. Do not add another UI framework or build a duplicate component when either registry already covers the interaction.
 - Keep constants such as API paths, enum values, and status codes under `src/lib/constants/`.
 - Keep pure, exported utility functions under `src/lib/utils/` and cover them with unit tests.

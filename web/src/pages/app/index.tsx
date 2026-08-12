@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useApplication } from "../hooks/applications/use-application";
-import { useCreateEnvironment } from "../hooks/applications/use-create-environment";
+import { useApplication } from "../../hooks/applications/use-application";
+import { useCreateEnvironment } from "../../hooks/applications/use-create-environment";
 import { SecretEditor } from "./secret-editor";
-import { ErrorBoundary } from "../components/error-boundary";
+import { ErrorBoundary } from "../../components/error-boundary";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { nameSchema } from "../lib/constants/schemas";
+import { nameSchema } from "../../lib/constants/schemas";
 import { z } from "zod";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 
 const envSchema = z.object({ name: nameSchema });
 
@@ -29,14 +31,14 @@ export function AppPage() {
       <h1 className="text-xl font-bold">{app.data?.name}</h1>
       <div className="flex flex-wrap items-center gap-2">
         {app.data?.environments.map((env) => (
-          <button
+          <Button
             key={env.id}
             className={`rounded px-3 py-1 ${activeEnv === env.id ? "bg-amber-500" : "border"}`}
             onClick={() => setActiveEnv(env.id)}
             data-testid={`env-${env.name}`}
           >
             {env.name}
-          </button>
+          </Button>
         ))}
         <form
           className="flex gap-1"
@@ -45,8 +47,8 @@ export function AppPage() {
             reset();
           })}
         >
-          <input className="rounded border p-1" placeholder="new env" {...register("name")} />
-          <button className="rounded border px-2" type="submit">+</button>
+          <Input className="" placeholder="new env" {...register("name")} />
+          <Button variant="outline"  type="submit">+</Button>
         </form>
       </div>
       {activeEnv ? (

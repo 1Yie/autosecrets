@@ -1,8 +1,10 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useCreateNodeGroup } from "../hooks/fleet/use-create-node-group";
-import { nameSchema } from "../lib/constants/schemas";
+import { useCreateNodeGroup } from "../../hooks/fleet/use-create-node-group";
+import { nameSchema } from "../../lib/constants/schemas";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 
 const groupSchema = z.object({ name: nameSchema });
 
@@ -20,12 +22,10 @@ export function CreateNodeGroupForm() {
         reset();
       })}
     >
-      <input
-        className="flex-1 rounded border p-2"
+      <Input className="flex-1"
         placeholder="group name"
-        {...register("name")}
-      />
-      <button className="rounded border px-4" type="submit">Create</button>
+        {...register("name")} />
+      <Button variant="outline"  type="submit">Create</Button>
     </form>
   );
 }

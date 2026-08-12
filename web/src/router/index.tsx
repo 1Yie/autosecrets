@@ -4,9 +4,9 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "../app-layout";
 import { ErrorBoundary } from "../components/error-boundary";
 
-const AppsPage = lazy(() => import("../pages/apps-page"));
-const AppPage = lazy(() => import("../pages/app-page"));
-const NodesPage = lazy(() => import("../pages/nodes-page"));
+const AppsPage = lazy(() => import("../pages/apps"));
+const AppPage = lazy(() => import("../pages/app"));
+const NodesPage = lazy(() => import("../pages/nodes"));
 
 function lazyPage(element: React.ReactNode) {
   return (

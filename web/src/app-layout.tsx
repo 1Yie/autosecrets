@@ -1,7 +1,7 @@
 import { Outlet } from "react-router-dom";
 import { useMe } from "./hooks/auth/use-me";
-import { BootstrapPage } from "./pages/bootstrap-page";
-import { LoginPage } from "./pages/login-page";
+import { BootstrapPage } from "./pages/bootstrap";
+import { LoginPage } from "./pages/login";
 import { ErrorBoundary } from "./components/error-boundary";
 
 /** Layout shell: decides bootstrap / login / authenticated shell, then the

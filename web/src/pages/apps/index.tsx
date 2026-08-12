@@ -1,10 +1,12 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "react-router-dom";
-import { useApplications } from "../hooks/applications/use-applications";
-import { useCreateApplication } from "../hooks/applications/use-create-application";
-import { nameSchema } from "../lib/constants/schemas";
+import { useApplications } from "../../hooks/applications/use-applications";
+import { useCreateApplication } from "../../hooks/applications/use-create-application";
+import { nameSchema } from "../../lib/constants/schemas";
 import { z } from "zod";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 
 const createAppSchema = z.object({ name: nameSchema });
 
@@ -42,16 +44,14 @@ export function AppsPage() {
           reset();
         })}
       >
-        <input
-          className="flex-1 rounded border p-2"
+        <Input className="flex-1"
           placeholder="Application name"
           data-testid="app-name"
-          {...register("name")}
-        />
+          {...register("name")} />
         {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
-        <button className="rounded bg-amber-500 px-4 font-semibold" type="submit">
+        <Button variant="default"  type="submit">
           Create
-        </button>
+        </Button>
       </form>
     </div>
   );

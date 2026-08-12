@@ -64,8 +64,12 @@ test("bootstrap to secret landing", async ({ page }) => {
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await expect(page.getByRole("listitem").filter({ hasText: "g1" })).toBeVisible();
   await page.getByTestId("assignment-revision").waitFor();
-  await page.getByRole("combobox").first().selectOption({ index: 1 });
-  await page.getByTestId("assignment-revision").selectOption({ index: 1 });
+  // Watermelon Select is a radix-style combobox: open the trigger and pick
+  // the option from the popup instead of using selectOption.
+  await page.getByRole("combobox").first().click();
+  await page.getByRole("option", { name: "g1" }).click();
+  await page.getByTestId("assignment-revision").click();
+  await page.getByRole("option").filter({ hasText: "payments/production" }).click();
   await page.getByRole("button", { name: "Assign" }).click();
   await expect(page.getByText(/g1 ←/)).toBeVisible();
 

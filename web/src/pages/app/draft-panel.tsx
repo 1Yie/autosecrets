@@ -1,6 +1,7 @@
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
-import type { Draft } from "../hooks/applications/use-draft";
-import type { Revision } from "../hooks/applications/use-revisions";
+import type { Draft } from "../../hooks/applications/use-draft";
+import type { Revision } from "../../hooks/applications/use-revisions";
+import { Button } from "../../components/ui/button";
 
 interface DraftPanelProps {
   draft: UseQueryResult<Draft, Error>;
@@ -20,13 +21,13 @@ export function DraftPanel({ draft, publish }: DraftPanelProps) {
           </li>
         ))}
       </ul>
-      <button
-        className="mt-3 rounded bg-amber-500 px-4 py-1 font-semibold disabled:opacity-50"
+      <Button variant="default" className="mt-3"
+        
         disabled={publish.isPending}
         onClick={() => publish.mutate()}
       >
         Publish revision
-      </button>
+      </Button>
       {publish.isError && (
         <p className="mt-1 text-sm text-red-500">
           {String((publish.error as Error).message)}

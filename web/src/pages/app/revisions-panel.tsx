@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { Revision } from "../hooks/applications/use-revisions";
+import type { Revision } from "../../hooks/applications/use-revisions";
 
 interface RevisionsPanelProps {
   revisions: UseQueryResult<Revision[], Error>;

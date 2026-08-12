@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { useCreateVersion } from "../hooks/applications/use-create-version";
-import type { SecretRow } from "../hooks/applications/use-secrets";
+import { useCreateVersion } from "../../hooks/applications/use-create-version";
+import type { SecretRow } from "../../hooks/applications/use-secrets";
+import { Button } from "../../components/ui/button";
 
 interface RotateButtonProps {
   secret: SecretRow;
@@ -22,8 +23,8 @@ export function RotateButton({ secret, appId, envId }: RotateButtonProps) {
         onChange={(e) => setValue(e.target.value)}
         data-testid={`rotate-${secret.name}`}
       />
-      <button
-        className="rounded border px-2 py-1 disabled:opacity-40"
+      <Button variant="outline"
+        
         disabled={!value || rotate.isPending}
         onClick={() => {
           rotate.mutate(value);
@@ -31,7 +32,7 @@ export function RotateButton({ secret, appId, envId }: RotateButtonProps) {
         }}
       >
         Rotate
-      </button>
+      </Button>
     </span>
   );
 }

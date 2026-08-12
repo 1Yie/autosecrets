@@ -1,7 +1,8 @@
-import { useAddMember } from "../hooks/fleet/use-add-member";
-import { useRemoveMember } from "../hooks/fleet/use-remove-member";
-import type { NodeGroup } from "../hooks/fleet/use-node-groups";
-import type { ManagedNode } from "../hooks/fleet/use-nodes";
+import { useAddMember } from "../../hooks/fleet/use-add-member";
+import { useRemoveMember } from "../../hooks/fleet/use-remove-member";
+import type { NodeGroup } from "../../hooks/fleet/use-node-groups";
+import type { ManagedNode } from "../../hooks/fleet/use-nodes";
+import { Button } from "../../components/ui/button";
 
 interface NodeGroupRowProps {
   group: NodeGroup;
@@ -19,14 +20,14 @@ export function NodeGroupRow({ group, nodes }: NodeGroupRowProps) {
       {nodes.map((n) => {
         const isMember = group.member_ids.includes(n.id);
         return (
-          <button
+          <Button
             key={n.id}
             className={`rounded border px-2 py-0.5 text-xs ${isMember ? "bg-amber-500" : ""}`}
             disabled={addMember.isPending || removeMember.isPending}
             onClick={() => (isMember ? removeMember.mutate(n.id) : addMember.mutate(n.id))}
           >
             {n.name}
-          </button>
+          </Button>
         );
       })}
     </li>

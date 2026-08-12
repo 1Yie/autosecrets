@@ -1,12 +1,13 @@
-import { useNodes } from "../hooks/fleet/use-nodes";
-import { useNodeGroups } from "../hooks/fleet/use-node-groups";
-import { useAssignments } from "../hooks/fleet/use-assignments";
+import { useNodes } from "../../hooks/fleet/use-nodes";
+import { useNodeGroups } from "../../hooks/fleet/use-node-groups";
+import { useAssignments } from "../../hooks/fleet/use-assignments";
 import { InstallCommandCard } from "./install-command-card";
 import { NodeGroupRow } from "./node-group-row";
 import { AssignmentForm } from "./assignment-form";
 import { CreateNodeGroupForm } from "./create-node-group-form";
-import { ErrorBoundary } from "../components/error-boundary";
-import type { ManagedNode } from "../hooks/fleet/use-nodes";
+import { ErrorBoundary } from "../../components/error-boundary";
+import type { ManagedNode } from "../../hooks/fleet/use-nodes";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
 export function NodesPage() {
   const nodes = useNodes();
@@ -48,28 +49,28 @@ export function NodesPage() {
 
 function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
   return (
-    <table className="mt-2 w-full text-left text-sm">
-      <thead>
-        <tr className="border-b opacity-60">
-          <th className="p-2">Name</th>
-          <th className="p-2">Observed</th>
-          <th className="p-2">Last result</th>
-          <th className="p-2">Last seen</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table className="mt-2 w-full text-left text-sm">
+      <TableHeader>
+        <TableRow className="border-b opacity-60">
+          <TableHead className="p-2">Name</TableHead>
+          <TableHead className="p-2">Observed</TableHead>
+          <TableHead className="p-2">Last result</TableHead>
+          <TableHead className="p-2">Last seen</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {nodes.map((n) => (
-          <tr key={n.id} className="border-b">
-            <td className="p-2 font-mono">{n.name}</td>
-            <td className="p-2 font-mono">{n.observed_revision.slice(0, 8)}…</td>
-            <td className="p-2">{n.last_result}</td>
-            <td className="p-2">
+          <TableRow key={n.id} className="border-b">
+            <TableCell className="p-2 font-mono">{n.name}</TableCell>
+            <TableCell className="p-2 font-mono">{n.observed_revision.slice(0, 8)}…</TableCell>
+            <TableCell className="p-2">{n.last_result}</TableCell>
+            <TableCell className="p-2">
               {n.last_seen_at ? new Date(n.last_seen_at).toLocaleTimeString() : "never"}
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 

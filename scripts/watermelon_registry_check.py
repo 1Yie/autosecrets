@@ -17,7 +17,7 @@ import sys
 import urllib.error
 import urllib.request
 
-DEFAULT_MANIFEST_URL = "https://ui.watermelon.sh/r/index.json"
+DEFAULT_MANIFEST_URL = "https://registry.watermelon.sh/r/button.json"
 
 
 def check_registry(url: str, timeout: float = 10.0) -> bool:
@@ -30,8 +30,13 @@ def check_registry(url: str, timeout: float = 10.0) -> bool:
                 return False
             body = response.read()
             data = json.loads(body)
-    except (urllib.error.URLError, urllib.error.HTTPError,
-            json.JSONDecodeError, TimeoutError, OSError):
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        json.JSONDecodeError,
+        TimeoutError,
+        OSError,
+    ):
         return False
     if not isinstance(data, dict):
         return False

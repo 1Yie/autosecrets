@@ -400,11 +400,15 @@ against [frontend-guidelines.md](./frontend-guidelines.md).
   Error Boundaries, centralized `src/router/index.ts` data router with
   per-route `React.lazy`, constants under `src/lib/constants/`, and minimal
   component splits.
-- Watermelon UI adoption is deferred: its registry endpoints return SPA HTML
-  instead of the expected component JSON in this environment (verified with
-  `shadcn add` and direct requests), so the existing shadcn primitives and
-  plain elements stay until the registry is reachable. Revisit when the
-  registry serves `index.json` / component manifests.
+- Watermelon UI adoption: the correct registry host is
+  `https://registry.watermelon.sh` (the `ui.watermelon.sh` host serves SPA
+  HTML and was the source of the earlier false negative). Button, Input,
+  Select, Table, Badge, Alert, Card, Label, and Textarea were installed from
+  `registry.watermelon.sh/r/*.json` (number-variant manifests pull the full
+  implementations), the shadcn fallbacks were replaced, and the pages now use
+  the components instead of plain HTML. The readiness gate in
+  `scripts/watermelon_registry_check.py` points at the correct host and
+  reports READY.
 - The readiness condition is now operationalized: `scripts/watermelon_registry_check.py`
   (with unit tests) passes only when the registry serves a JSON manifest,
   and `scripts/run-e2e.sh`-independent CI job reports it as a non-blocking

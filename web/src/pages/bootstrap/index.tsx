@@ -1,7 +1,9 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useBootstrap } from "../hooks/auth/use-bootstrap";
-import { bootstrapSchema, type BootstrapForm } from "../lib/constants/schemas";
+import { useBootstrap } from "../../hooks/auth/use-bootstrap";
+import { bootstrapSchema, type BootstrapForm } from "../../lib/constants/schemas";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 
 export function BootstrapPage() {
   const bootstrap = useBootstrap();
@@ -23,40 +25,34 @@ export function BootstrapPage() {
         Administrator. There is no default credential.
       </p>
       <form onSubmit={handleSubmit((v) => bootstrap.mutate(v))} className="space-y-3">
-        <input
-          className="w-full rounded border p-2"
+        <Input className="w-full"
           placeholder="Bootstrap code"
           data-testid="code"
-          {...register("code")}
-        />
+          {...register("code")} />
         {errors.code && <p className="text-sm text-red-500">{errors.code.message}</p>}
-        <input
-          className="w-full rounded border p-2"
+        <Input className="w-full"
           placeholder="Username"
           data-testid="username"
-          {...register("username")}
-        />
+          {...register("username")} />
         {errors.username && <p className="text-sm text-red-500">{errors.username.message}</p>}
-        <input
-          className="w-full rounded border p-2"
+        <Input className="w-full"
           type="password"
           placeholder="Password (min 10 chars)"
           data-testid="password"
-          {...register("password")}
-        />
+          {...register("password")} />
         {errors.password && <p className="text-sm text-red-500">{errors.password.message}</p>}
         {bootstrap.isError && (
           <p className="text-sm text-red-500">
             {String((bootstrap.error as Error).message)}
           </p>
         )}
-        <button
-          className="w-full rounded bg-amber-500 p-2 font-semibold disabled:opacity-50"
+        <Button variant="default" className="w-full"
+          
           disabled={!isValid || isSubmitting || bootstrap.isPending}
           type="submit"
         >
           Create administrator
-        </button>
+        </Button>
       </form>
     </div>
   );
