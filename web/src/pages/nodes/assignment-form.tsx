@@ -8,6 +8,7 @@ import type { Assignment } from "../../hooks/fleet/use-assignments";
 import type { NodeGroup } from "../../hooks/fleet/use-node-groups";
 import { Button } from "../../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Skeleton } from "../../components/ui/skeleton";
 
 const assignmentSchema = z.object({
   group_id: z.string().min(1, "请选择节点组"),
@@ -85,7 +86,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
           {String((createAssignment.error as Error).message)}
         </p>
       )}
-      {assignments.isLoading && <p className="mt-2 text-sm opacity-60">Loading…</p>}
+      {assignments.isLoading && <Skeleton className="mt-2 h-4 w-40" />}
       {assignments.isError && <p className="mt-1 text-sm text-red-500">Assignments 加载失败</p>}
       <ul className="mt-2 space-y-1 text-sm">
         {assignments.data?.map((a) => (

@@ -10,6 +10,7 @@ import { nameSchema } from "../../lib/constants/schemas";
 import { z } from "zod";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Skeleton } from "../../components/ui/skeleton";
 
 const envSchema = z.object({ name: nameSchema });
 
@@ -22,7 +23,14 @@ export function AppPage() {
     resolver: zodResolver(envSchema),
   });
 
-  if (app.isLoading) return <p>Loading…</p>;
+  if (app.isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-6 w-32" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
   if (app.isError) return <p className="text-red-500">Application not found</p>;
 
   return (

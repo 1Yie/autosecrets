@@ -8,6 +8,7 @@ import { CreateNodeGroupForm } from "./create-node-group-form";
 import { ErrorBoundary } from "../../components/error-boundary";
 import type { ManagedNode } from "../../hooks/fleet/use-nodes";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { Skeleton } from "../../components/ui/skeleton";
 
 export function NodesPage() {
   const nodes = useNodes();
@@ -23,7 +24,7 @@ export function NodesPage() {
 
       <section className="rounded border p-4">
         <h2 className="font-semibold">Managed nodes</h2>
-        {nodes.isLoading && <p className="text-sm opacity-60">Loading…</p>}
+        {nodes.isLoading && <Skeleton className="h-24 w-full" />}
         {nodes.isError && <p className="text-sm text-red-500">Nodes 加载失败</p>}
         <NodeTable nodes={nodes.data ?? []} />
       </section>
@@ -31,7 +32,7 @@ export function NodesPage() {
       <section className="rounded border p-4">
         <h2 className="font-semibold">Node groups</h2>
         <CreateNodeGroupForm />
-        {groups.isLoading && <p className="text-sm opacity-60">Loading…</p>}
+        {groups.isLoading && <Skeleton className="h-8 w-48" />}
         {groups.isError && <p className="text-sm text-red-500">Node groups 加载失败</p>}
         <ul className="mt-2 space-y-1 text-sm">
           {groups.data?.map((g) => (

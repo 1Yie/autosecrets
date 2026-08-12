@@ -7,6 +7,7 @@ import { nameSchema } from "../../lib/constants/schemas";
 import { z } from "zod";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Skeleton } from "../../components/ui/skeleton";
 
 const createAppSchema = z.object({ name: nameSchema });
 
@@ -23,7 +24,12 @@ export function AppsPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">Applications</h1>
-      {apps.isLoading && <p>Loading…</p>}
+      {apps.isLoading && (
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
+      )}
       {apps.isError && <p className="text-red-500">Failed to load applications</p>}
       {apps.data?.length === 0 && (
         <p className="opacity-60">No applications yet. Create one to begin.</p>

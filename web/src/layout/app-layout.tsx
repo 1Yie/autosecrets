@@ -3,13 +3,15 @@ import { useMe } from "../hooks/auth/use-me";
 import { BootstrapPage } from "../pages/bootstrap";
 import { LoginPage } from "../pages/login";
 import { ErrorBoundary } from "../components/error-boundary";
+import { Skeleton } from "../components/ui/skeleton";
+import { Header } from "../components/header";
 
 /** Layout shell: decides bootstrap / login / authenticated shell, then the
  * routed page. All async states (loading/error/success) are explicit. */
 export function AppLayout() {
   const me = useMe();
 
-  if (me.isLoading) return <p className="p-6">Loading…</p>;
+  if (me.isLoading) return <PageSkeleton />;
 
   if (me.isError && !me.data) {
     return (
@@ -44,14 +46,18 @@ export function AppLayout() {
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto max-w-4xl p-6">
-      <header className="mb-6 flex items-center justify-between">
-        <span className="text-lg font-bold tracking-tight">AutoSecrets</span>
-        <nav className="flex gap-4 text-sm">
-          <a href="/apps">Applications</a>
-          <a href="/nodes">Nodes</a>
-        </nav>
-      </header>
+      <Header />
       {children}
+    </div>
+  );
+}
+
+function PageSkeleton() {
+  return (
+    <div className="mx-auto max-w-4xl space-y-4 p-6">
+      <Skeleton className="h-6 w-40" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-24 w-full" />
     </div>
   );
 }

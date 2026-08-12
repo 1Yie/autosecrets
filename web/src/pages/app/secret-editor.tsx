@@ -7,6 +7,7 @@ import { usePublish } from "../../hooks/applications/use-publish";
 import { useRevisions } from "../../hooks/applications/use-revisions";
 import { secretSchema, type SecretForm } from "../../lib/constants/schemas";
 import { BindingRow } from "./binding-row";
+import { Skeleton } from "../../components/ui/skeleton";
 import { RotateButton } from "./rotate-button";
 import { DraftPanel } from "./draft-panel";
 import { RevisionsPanel } from "./revisions-panel";
@@ -49,7 +50,7 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
       {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
       {errors.value && <p className="text-sm text-red-500">{errors.value.message}</p>}
 
-      {secrets.isLoading && <p>Loading secrets…</p>}
+      {secrets.isLoading && <Skeleton className="h-24 w-full" />}
       {secrets.isError && <p className="text-red-500">Failed to load secrets</p>}
       <Table className="w-full text-left text-sm">
         <TableHeader>

@@ -3,6 +3,7 @@ import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "../layout/app-layout";
 import { ErrorBoundary } from "../components/error-boundary";
+import { Spinner } from "../components/ui/spinner";
 
 const AppsPage = lazy(() => import("../pages/apps"));
 const AppPage = lazy(() => import("../pages/app"));
@@ -10,7 +11,15 @@ const NodesPage = lazy(() => import("../pages/nodes"));
 
 function lazyPage(element: React.ReactNode) {
   return (
-    <Suspense fallback={<p className="p-6">Loading…</p>}>{element}</Suspense>
+    <Suspense
+      fallback={
+        <div className="flex justify-center p-12">
+          <Spinner />
+        </div>
+      }
+    >
+      {element}
+    </Suspense>
   );
 }
 
