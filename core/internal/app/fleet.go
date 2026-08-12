@@ -5,20 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"autosecrets.dev/core/internal/store"
 	"github.com/google/uuid"
 )
 
 func (a *App) handleListNodeGroups(w http.ResponseWriter, r *http.Request) {
-	groups, err := a.store.ListNodeGroups(r.Context())
+	cursor, limit, err := a.pageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		return
+	}
+	groups, next, err := a.store.ListNodeGroupsPage(r.Context(), cursor, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, groups)
+	writeJSON(w, http.StatusOK, map[string]any{"items": groups, "next_cursor": next})
 }
 
 func (a *App) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) {
@@ -78,12 +85,17 @@ func (a *App) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleListAssignments(w http.ResponseWriter, r *http.Request) {
-	assignments, err := a.store.ListAssignments(r.Context())
+	cursor, limit, err := a.pageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		return
+	}
+	assignments, next, err := a.store.ListAssignmentsPage(r.Context(), cursor, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, assignments)
+	writeJSON(w, http.StatusOK, map[string]any{"items": assignments, "next_cursor": next})
 }
 
 func (a *App) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
@@ -165,23 +177,94 @@ func (a *App) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			"last_result": node.LastResult, "state": state, "unassigned": unassigned,
 		})
 	}
-	writeJSON(w, http.StatusOK, out)
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]["created_at"].(time.Time)
+		right := out[j]["created_at"].(time.Time)
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return out[i]["id"].(string) > out[j]["id"].(string)
+	})
+	cursor, limit, err := a.pageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		return
+	}
+	var start int
+	if cursor.ID != "" {
+		for i, item := range out {
+			at := item["created_at"].(time.Time)
+			if item["id"].(string) == cursor.ID && (cursor.At.IsZero() || at.Equal(cursor.At)) {
+				start = i + 1
+				break
+			}
+		}
+	}
+	page := out
+	next := ""
+	if start < len(out) {
+		end := start + limit
+		if end > len(out) {
+			end = len(out)
+		}
+		page = out[start:end]
+		if end < len(out) {
+			last := out[end-1]
+			next = store.EncodeCursor(last["created_at"].(time.Time), last["id"].(string))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": page, "next_cursor": next})
 }
 
 func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
 	filter := store.AuditFilter{
-		Actor:  r.URL.Query().Get("actor"),
-		Action: r.URL.Query().Get("action"),
+		Actor:          r.URL.Query().Get("actor"),
+		Action:         r.URL.Query().Get("action"),
+		Resource:       r.URL.Query().Get("resource"),
+		Outcome:        r.URL.Query().Get("outcome"),
+		ReasonCategory: r.URL.Query().Get("reason_category"),
+	}
+	if from := r.URL.Query().Get("from"); from != "" {
+		if parsed, err := time.Parse(time.RFC3339, from); err == nil {
+			filter.From = parsed
+		}
+	}
+	if to := r.URL.Query().Get("to"); to != "" {
+		if parsed, err := time.Parse(time.RFC3339, to); err == nil {
+			filter.To = parsed
+		}
+	}
+	var afterID int64
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		afterID, _ = strconv.ParseInt(raw, 10, 64)
 	}
 	if limit := r.URL.Query().Get("limit"); limit != "" {
 		if n, err := strconv.Atoi(limit); err == nil {
 			filter.Limit = n
 		}
 	}
-	events, err := a.store.ListAudit(r.Context(), filter)
+	events, next, err := a.store.ListAuditPage(r.Context(), filter, afterID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, events)
+	writeJSON(w, http.StatusOK, map[string]any{"items": events, "next_cursor": next})
+}
+
+// pageParams parses the shared cursor and limit query parameters.
+func (a *App) pageParams(r *http.Request) (store.Cursor, int, error) {
+	cursor, err := store.DecodeCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		return store.Cursor{}, 0, err
+	}
+	limit := 25
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return cursor, limit, nil
 }

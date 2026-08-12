@@ -561,9 +561,10 @@ func isUniqueViolation(err error) bool {
 // --- Node Groups, Assignments, Nodes --------------------------------------
 
 type NodeGroup struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	MemberIDs []string `json:"member_ids"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	MemberIDs []string  `json:"member_ids"`
 }
 
 func (s *Store) ListNodeGroups(ctx context.Context) ([]NodeGroup, error) {

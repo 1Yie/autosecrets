@@ -67,12 +67,17 @@ func operationReason(body *operationReasonInput) (store.OperationReason, bool) {
 func modeString(m int64) string { return fmt.Sprintf("%04o", m) }
 
 func (a *App) handleListApplications(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.store.ListApplications(r.Context())
+	cursor, limit, err := a.pageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		return
+	}
+	rows, next, err := a.store.ListApplicationsPage(r.Context(), cursor, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	writeJSON(w, http.StatusOK, map[string]any{"items": rows, "next_cursor": next})
 }
 
 func (a *App) handleCreateApplication(w http.ResponseWriter, r *http.Request) {

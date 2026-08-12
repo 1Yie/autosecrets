@@ -6,7 +6,6 @@ package app
 // and a minimal body invariant; deep behavior lives in the flow tests.
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -48,8 +47,8 @@ func TestApplicationListAndDetail(t *testing.T) {
 	if list.status != 200 {
 		t.Fatalf("list applications: %d %s", list.status, list.raw)
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal(list.raw, &rows); err != nil || len(rows) != 1 {
+	rows := parsePage(t, list.raw)
+	if len(rows) != 1 {
 		t.Fatalf("applications payload: %s", list.raw)
 	}
 	detail := ta.do(t, "GET", "/api/v1/applications/"+a.appID, nil, a.cookie, "")
@@ -102,14 +101,14 @@ func TestFleetListAndMembershipFlows(t *testing.T) {
 	}
 
 	groups := ta.do(t, "GET", "/api/v1/node-groups", nil, a.cookie, "")
-	var groupRows []map[string]any
-	if err := json.Unmarshal(groups.raw, &groupRows); err != nil || len(groupRows) != 1 ||
+	groupRows := parsePage(t, groups.raw)
+	if len(groupRows) != 1 ||
 		len(groupRows[0]["member_ids"].([]any)) != 1 {
 		t.Fatalf("node groups payload: %s", groups.raw)
 	}
 	assigns := ta.do(t, "GET", "/api/v1/assignments", nil, a.cookie, "")
-	var assignRows []map[string]any
-	if err := json.Unmarshal(assigns.raw, &assignRows); err != nil || len(assignRows) != 1 {
+	assignRows := parsePage(t, assigns.raw)
+	if len(assignRows) != 1 {
 		t.Fatalf("assignments payload: %s", assigns.raw)
 	}
 
@@ -119,8 +118,7 @@ func TestFleetListAndMembershipFlows(t *testing.T) {
 		t.Fatalf("remove member: %d %s", remove.status, remove.raw)
 	}
 	groupsAfter := ta.do(t, "GET", "/api/v1/node-groups", nil, a.cookie, "")
-	var after []map[string]any
-	_ = json.Unmarshal(groupsAfter.raw, &after)
+	after := parsePage(t, groupsAfter.raw)
 	if len(after[0]["member_ids"].([]any)) != 0 {
 		t.Fatalf("member not removed: %s", groupsAfter.raw)
 	}

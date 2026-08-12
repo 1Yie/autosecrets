@@ -50,9 +50,26 @@ export const handlers = [
       expires_at: "2026-08-12T02:00:00Z",
     }),
   ),
-  http.get("/api/v1/nodes", () => HttpResponse.json([])),
-  http.get("/api/v1/node-groups", () => HttpResponse.json([])),
-  http.get("/api/v1/assignments", () => HttpResponse.json([])),
+  http.get("/api/v1/nodes", () =>
+    HttpResponse.json({ items: [], next_cursor: "" }),
+  ),
+  http.get("/api/v1/node-groups", () =>
+    HttpResponse.json({ items: [], next_cursor: "" }),
+  ),
+  http.get("/api/v1/assignments", () =>
+    HttpResponse.json({ items: [], next_cursor: "" }),
+  ),
+  http.get("/api/v1/applications", () =>
+    HttpResponse.json({
+      items: [{ id: "app-1", name: "payments", created_at: "2026-08-12T12:00:00Z" }],
+      next_cursor: "",
+    }),
+  ),
+  http.get("/api/v1/search", () =>
+    HttpResponse.json({
+      results: [{ type: "application", id: "app-1", name: "payments" }],
+    }),
+  ),
   http.get("/api/v1/overview", () =>
     HttpResponse.json({
       generated_at: "2026-08-12T12:00:00Z",
@@ -70,7 +87,32 @@ export const handlers = [
       recent_audit: [],
     }),
   ),
-  http.get("/api/v1/audit-events", () => HttpResponse.json([])),
+  http.get("/api/v1/audit-events", () =>
+    HttpResponse.json({
+      items: [
+        {
+          id: 1,
+          actor: "member:admin",
+          action: "application.create",
+          resource: "app-1",
+          result: "ok",
+          correlation_id: "c1",
+          created_at: "2026-08-12T12:00:00Z",
+          actor_type: "member",
+          actor_id: "admin",
+          actor_display: "member:admin",
+          resource_type: "application",
+          resource_id: "app-1",
+          resource_display: "app-1",
+          outcome: "ok",
+          operation_reason_category: "",
+          operation_reason_explanation: "",
+          operation_reason_external_ref: "",
+        },
+      ],
+      next_cursor: "",
+    }),
+  ),
   http.get("/api/v1/applications/:appId/environments/:envId/draft", () =>
     HttpResponse.json({
       version: 3,

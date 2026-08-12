@@ -181,7 +181,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Applications */
+        /** List Applications (cursor paginated) */
         get: operations["listApplications"];
         put?: never;
         /** Create an Application */
@@ -408,7 +408,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Node Groups with members */
+        /** List Node Groups with members (cursor paginated) */
         get: operations["listNodeGroups"];
         put?: never;
         /** Create a Node Group */
@@ -460,7 +460,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Assignments */
+        /** List Assignments (cursor paginated) */
         get: operations["listAssignments"];
         put?: never;
         /** Assign a Secret Bundle to a Node Group (follows the Desired Revision) */
@@ -547,7 +547,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Managed Nodes and their convergence state */
+        /** List Managed Nodes and their convergence state (cursor paginated) */
         get: operations["listNodes"];
         put?: never;
         post?: never;
@@ -600,6 +600,23 @@ export interface paths {
         };
         /** List Audit Events (never contains Secret values) */
         get: operations["listAuditEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Global search across Applications, Environments, Nodes, and Node Groups */
+        get: operations["search"];
         put?: never;
         post?: never;
         delete?: never;
@@ -823,6 +840,38 @@ export interface components {
             correlation_id: string;
             /** Format: date-time */
             created_at: string;
+            actor_type: string;
+            actor_id: string;
+            /** @description Event-time display snapshot; renames never rewrite history */
+            actor_display: string;
+            resource_type: string;
+            resource_id: string;
+            resource_display: string;
+            outcome: string;
+            operation_reason_category?: string;
+            operation_reason_explanation?: string;
+            operation_reason_external_ref?: string;
+        };
+        Page: {
+            items: components["schemas"]["Application"][];
+            /** @description Opaque keyset position; empty on the last page */
+            next_cursor: string;
+        };
+        NodeGroupPage: {
+            items: components["schemas"]["NodeGroup"][];
+            next_cursor: string;
+        };
+        AssignmentPage: {
+            items: components["schemas"]["Assignment"][];
+            next_cursor: string;
+        };
+        NodePage: {
+            items: components["schemas"]["Node"][];
+            next_cursor: string;
+        };
+        AuditEventPage: {
+            items: components["schemas"]["AuditEvent"][];
+            next_cursor: string;
         };
         Error: {
             /** @description Human-readable message; never parse it */
@@ -1212,13 +1261,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Applications ordered by name */
+            /** @description Applications newest first */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Application"][];
+                    "application/json": components["schemas"]["Page"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -1640,13 +1689,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Node Groups ordered by name */
+            /** @description Node Groups newest first */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NodeGroup"][];
+                    "application/json": components["schemas"]["NodeGroupPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -1759,7 +1808,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Assignment"][];
+                    "application/json": components["schemas"]["AssignmentPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -1972,13 +2021,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Nodes ordered by name */
+            /** @description Nodes newest first */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Node"][];
+                    "application/json": components["schemas"]["NodePage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2049,8 +2098,20 @@ export interface operations {
                 actor?: string;
                 /** @description Filter by exact action */
                 action?: string;
-                /** @description Cap the result set (default 100, max 500); Audit Events grow without bound */
+                /** @description Page size (default 25, max 100) */
                 limit?: number;
+                /** @description Opaque keyset position from the previous page */
+                cursor?: string;
+                /** @description Filter by exact resource display */
+                resource?: string;
+                /** @description Filter by exact outcome code */
+                outcome?: string;
+                /** @description Filter by Operation Reason category */
+                reason_category?: string;
+                /** @description Inclusive lower bound (RFC 3339) */
+                from?: string;
+                /** @description Inclusive upper bound (RFC 3339) */
+                to?: string;
             };
             header?: never;
             path?: never;
@@ -2064,7 +2125,38 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuditEvent"][];
+                    "application/json": components["schemas"]["AuditEventPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    search: {
+        parameters: {
+            query: {
+                /** @description Search query */
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Grouped search results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        results: {
+                            /** @enum {string} */
+                            type: "application" | "environment" | "node" | "node_group";
+                            id: string;
+                            name: string;
+                        }[];
+                    };
                 };
             };
             401: components["responses"]["Unauthorized"];

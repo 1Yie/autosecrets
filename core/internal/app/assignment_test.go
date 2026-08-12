@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -46,8 +45,7 @@ func TestAssignmentBindsBundleAndFollowsDesiredRevision(t *testing.T) {
 	ta.addVersion(t, a, ta.secretID(t, a), "v2")
 	rev2 := ta.publish(t, a)
 	list := ta.do(t, "GET", "/api/v1/assignments", nil, a.cookie, "")
-	var rows []map[string]any
-	_ = json.Unmarshal(list.raw, &rows)
+	rows := parsePage(t, list.raw)
 	if len(rows) != 1 || rows[0]["revision_id"] != rev2 {
 		t.Fatalf("assignment must follow the new desired revision: %s", list.raw)
 	}

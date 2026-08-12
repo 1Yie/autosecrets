@@ -9,6 +9,8 @@ import (
 	"embed"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -185,13 +187,23 @@ func (s *Store) DeleteSession(ctx context.Context, idHash string) error {
 // --- Audit ----------------------------------------------------------------
 
 type AuditEvent struct {
-	ID            int64  `json:"id"`
-	Actor         string `json:"actor"`
-	Action        string `json:"action"`
-	Resource      string `json:"resource"`
-	Result        string `json:"result"`
-	CorrelationID string `json:"correlation_id"`
-	CreatedAt     string `json:"created_at"`
+	ID                int64  `json:"id"`
+	Actor             string `json:"actor"`
+	Action            string `json:"action"`
+	Resource          string `json:"resource"`
+	Result            string `json:"result"`
+	CorrelationID     string `json:"correlation_id"`
+	CreatedAt         string `json:"created_at"`
+	ActorType         string `json:"actor_type"`
+	ActorID           string `json:"actor_id"`
+	ActorDisplay      string `json:"actor_display"`
+	ResourceType      string `json:"resource_type"`
+	ResourceID        string `json:"resource_id"`
+	ResourceDisplay   string `json:"resource_display"`
+	Outcome           string `json:"outcome"`
+	ReasonCategory    string `json:"operation_reason_category"`
+	ReasonExplanation string `json:"operation_reason_explanation"`
+	ReasonExternalRef string `json:"operation_reason_external_ref"`
 }
 
 // AppendAudit inserts an Audit Event inside the caller's transaction when tx
@@ -200,16 +212,36 @@ type AuditEvent struct {
 func (s *Store) AppendAudit(ctx context.Context, tx pgx.Tx, e AuditEvent) error {
 	execer := execer(ctx, s.pool, tx)
 	_, err := execer.Exec(ctx,
-		`INSERT INTO audit_events (actor, action, resource, result, correlation_id)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		e.Actor, e.Action, e.Resource, e.Result, e.CorrelationID)
+		`INSERT INTO audit_events
+			(actor, action, resource, result, correlation_id,
+			 actor_type, actor_id, actor_display,
+			 resource_type, resource_id, resource_display,
+			 outcome, operation_reason_category, operation_reason_explanation, operation_reason_external_ref)
+		 VALUES ($1, $2, $3, $4, $5,
+			 COALESCE(NULLIF($6, ''), split_part($1, ':', 1)),
+			 COALESCE(NULLIF($7, ''), split_part($1, ':', 2)),
+			 COALESCE(NULLIF($8, ''), $1),
+			 COALESCE(NULLIF($9, ''), split_part($3, ':', 1)),
+			 COALESCE(NULLIF($10, ''), split_part($3, ':', 2)),
+			 COALESCE(NULLIF($11, ''), $3),
+			 COALESCE(NULLIF($12, ''), $4),
+			 COALESCE(NULLIF($13, ''), ''), COALESCE(NULLIF($14, ''), ''), COALESCE(NULLIF($15, ''), ''))`,
+		e.Actor, e.Action, e.Resource, e.Result, e.CorrelationID,
+		e.ActorType, e.ActorID, e.ActorDisplay,
+		e.ResourceType, e.ResourceID, e.ResourceDisplay,
+		e.Outcome, e.ReasonCategory, e.ReasonExplanation, e.ReasonExternalRef)
 	return err
 }
 
 type AuditFilter struct {
-	Actor  string
-	Action string
-	Limit  int
+	Actor          string
+	Action         string
+	Resource       string
+	Outcome        string
+	ReasonCategory string
+	From           time.Time
+	To             time.Time
+	Limit          int
 }
 
 func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEvent, error) {
@@ -252,6 +284,75 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEvent, err
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// ListAuditPage returns cursor-paginated structured Audit Events ordered by
+// id DESC with the documented filters (ADR-0020). The cursor is the last
+// visible event id.
+func (s *Store) ListAuditPage(ctx context.Context, f AuditFilter, afterID int64) ([]AuditEvent, string, error) {
+	if f.Limit <= 0 || f.Limit > 100 {
+		f.Limit = 25
+	}
+	query := `SELECT id, actor, action, resource, result, correlation_id,
+		to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+		actor_type, actor_id, actor_display, resource_type, resource_id, resource_display,
+		outcome, operation_reason_category, operation_reason_explanation, operation_reason_external_ref
+		FROM audit_events`
+	args := []any{}
+	conds := []string{}
+	if afterID > 0 {
+		args = append(args, afterID)
+		conds = append(conds, fmt.Sprintf("id < $%d", len(args)))
+	}
+	add := func(column, value string) {
+		if value == "" {
+			return
+		}
+		args = append(args, value)
+		conds = append(conds, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	add("actor", f.Actor)
+	add("action", f.Action)
+	add("resource", f.Resource)
+	add("outcome", f.Outcome)
+	add("operation_reason_category", f.ReasonCategory)
+	if !f.From.IsZero() {
+		args = append(args, f.From)
+		conds = append(conds, fmt.Sprintf("created_at >= $%d", len(args)))
+	}
+	if !f.To.IsZero() {
+		args = append(args, f.To)
+		conds = append(conds, fmt.Sprintf("created_at <= $%d", len(args)))
+	}
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
+	}
+	args = append(args, f.Limit+1)
+	query += fmt.Sprintf(" ORDER BY id DESC LIMIT $%d", len(args))
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rows.Close()
+	out := []AuditEvent{}
+	for rows.Next() {
+		var e AuditEvent
+		if err := rows.Scan(&e.ID, &e.Actor, &e.Action, &e.Resource, &e.Result, &e.CorrelationID,
+			&e.CreatedAt, &e.ActorType, &e.ActorID, &e.ActorDisplay,
+			&e.ResourceType, &e.ResourceID, &e.ResourceDisplay, &e.Outcome,
+			&e.ReasonCategory, &e.ReasonExplanation, &e.ReasonExternalRef); err != nil {
+			return nil, "", err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	if len(out) <= f.Limit {
+		return out, "", nil
+	}
+	next := out[f.Limit]
+	return out[:f.Limit], strconv.FormatInt(next.ID, 10), nil
 }
 
 // --- transactions ---------------------------------------------------------

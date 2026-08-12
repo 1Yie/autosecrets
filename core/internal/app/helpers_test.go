@@ -234,6 +234,18 @@ func (ta *testApp) secretID(t *testing.T, a authoring) string {
 	return rows[0]["id"].(string)
 }
 
+// parsePage decodes a cursor envelope's items for tests.
+func parsePage(t *testing.T, raw []byte) []map[string]any {
+	t.Helper()
+	var body struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Items
+}
+
 func (ta *testApp) installCommand(t *testing.T, cookie, csrf, name string) string {
 	t.Helper()
 	res := ta.do(t, "POST", "/api/v1/nodes/install-command", map[string]string{"name": name}, cookie, csrf)

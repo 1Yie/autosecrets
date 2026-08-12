@@ -10,6 +10,7 @@ export const API_PATHS = {
   stepUp: "/api/v1/auth/step-up",
   renew: "/api/v1/auth/renew",
   overview: "/api/v1/overview",
+  search: "/api/v1/search",
   auditEvents: "/api/v1/audit-events",
   applications: "/api/v1/applications",
   application: (id: string) => `/api/v1/applications/${id}`,

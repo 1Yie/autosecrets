@@ -7,6 +7,7 @@ import { LoginPage } from "../pages/login";
 import { ErrorBoundary } from "../components/error-boundary";
 import { Skeleton } from "../components/ui/skeleton";
 import { ThemeToggle } from "../components/theme-toggle";
+import { SearchBox } from "../components/search-box";
 import { cn } from "../lib/utils";
 
 const navItems = [
@@ -88,6 +89,7 @@ export function AppLayout() {
               {me.data.organization?.display_name ?? "AutoSecrets"}
             </div>
             <div className="flex items-center gap-3">
+              <SearchBox />
               <ThemeToggle />
               <span className="text-sm" data-testid="current-user">
                 {me.data.member.username}

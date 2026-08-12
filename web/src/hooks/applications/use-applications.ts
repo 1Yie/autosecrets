@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../../lib/api";
+import { useCursorPage } from "../use-cursor-page";
 import { API_PATHS } from "../../lib/constants/api-paths";
 
 export interface Application { id: string; name: string; created_at: string; }
@@ -12,5 +11,7 @@ export interface Revision { id: string; draft_version: number; file_count: numbe
 export interface RevisionRef { revision_id: string; label: string; }
 
 export function useApplications() {
-  return useQuery({ queryKey: ["applications"], queryFn: () => apiGet<Application[]>(API_PATHS.applications) });
+  return useCursorPage<Application>(["applications"], (cursor) =>
+    `${API_PATHS.applications}?${cursor ? `cursor=${cursor}` : ""}`,
+  );
 }

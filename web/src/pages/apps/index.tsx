@@ -31,11 +31,11 @@ export function AppsPage() {
         </div>
       )}
       {apps.isError && <p className="text-red-500">应用加载失败</p>}
-      {apps.data?.length === 0 && (
+      {apps.items.length === 0 && !apps.isLoading && (
         <p className="opacity-60">还没有应用，创建一个开始。</p>
       )}
       <ul className="space-y-2">
-        {apps.data?.map((app) => (
+        {apps.items.map((app) => (
           <li key={app.id}>
             <Link to={`/apps/${app.id}`} className="block rounded border p-3 hover:bg-white/5">
               {app.name}
@@ -59,6 +59,14 @@ export function AppsPage() {
           创建
         </Button>
       </form>
+      <div className="flex items-center gap-2 text-sm">
+        <Button variant="outline" size="sm" disabled={apps.isFirstPage} onClick={apps.prev}>
+          上一页
+        </Button>
+        <Button variant="outline" size="sm" disabled={!apps.nextCursor} onClick={apps.next}>
+          下一页
+        </Button>
+      </div>
     </div>
   );
 }

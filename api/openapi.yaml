@@ -317,16 +317,14 @@ paths:
     get:
       operationId: listApplications
       tags: [Authoring]
-      summary: List Applications
+      summary: List Applications (cursor paginated)
       responses:
         "200":
-          description: Applications ordered by name
+          description: Applications newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Application"
+                $ref: "#/components/schemas/Page"
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
@@ -755,16 +753,14 @@ paths:
     get:
       operationId: listNodeGroups
       tags: [Fleet]
-      summary: List Node Groups with members
+      summary: List Node Groups with members (cursor paginated)
       responses:
         "200":
-          description: Node Groups ordered by name
+          description: Node Groups newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/NodeGroup"
+                $ref: "#/components/schemas/NodeGroupPage"
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
@@ -854,16 +850,14 @@ paths:
     get:
       operationId: listAssignments
       tags: [Fleet]
-      summary: List Assignments
+      summary: List Assignments (cursor paginated)
       responses:
         "200":
           description: Assignments newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Assignment"
+                $ref: "#/components/schemas/AssignmentPage"
         "401":
           $ref: "#/components/responses/Unauthorized"
     post:
@@ -1067,16 +1061,14 @@ paths:
     get:
       operationId: listNodes
       tags: [Fleet]
-      summary: List Managed Nodes and their convergence state
+      summary: List Managed Nodes and their convergence state (cursor paginated)
       responses:
         "200":
-          description: Nodes ordered by name
+          description: Nodes newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Node"
+                $ref: "#/components/schemas/NodePage"
         "401":
           $ref: "#/components/responses/Unauthorized"
   /api/v1/overview:
@@ -1149,20 +1141,93 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Cap the result set (default 100, max 500); Audit Events grow without bound
+          description: Page size (default 25, max 100)
           schema:
             type: integer
             minimum: 1
-            maximum: 500
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque keyset position from the previous page
+          schema:
+            type: string
+        - name: resource
+          in: query
+          required: false
+          description: Filter by exact resource display
+          schema:
+            type: string
+        - name: outcome
+          in: query
+          required: false
+          description: Filter by exact outcome code
+          schema:
+            type: string
+        - name: reason_category
+          in: query
+          required: false
+          description: Filter by Operation Reason category
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          description: Inclusive lower bound (RFC 3339)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Inclusive upper bound (RFC 3339)
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Audit Events newest first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/AuditEvent"
+                $ref: "#/components/schemas/AuditEventPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/search:
+    get:
+      operationId: search
+      tags: [Fleet]
+      summary: Global search across Applications, Environments, Nodes, and Node Groups
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        "200":
+          description: Grouped search results
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [type, id, name]
+                      properties:
+                        type:
+                          type: string
+                          enum: [application, environment, node, node_group]
+                        id:
+                          type: string
+                        name:
+                          type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
 components:
@@ -1649,7 +1714,21 @@ components:
           format: date-time
     AuditEvent:
       type: object
-      required: [id, actor, action, resource, result, correlation_id, created_at]
+      required:
+        - id
+        - actor
+        - action
+        - resource
+        - result
+        - correlation_id
+        - created_at
+        - actor_type
+        - actor_id
+        - actor_display
+        - resource_type
+        - resource_id
+        - resource_display
+        - outcome
       properties:
         id:
           type: integer
@@ -1667,6 +1746,78 @@ components:
         created_at:
           type: string
           format: date-time
+        actor_type:
+          type: string
+        actor_id:
+          type: string
+        actor_display:
+          type: string
+          description: Event-time display snapshot; renames never rewrite history
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        resource_display:
+          type: string
+        outcome:
+          type: string
+        operation_reason_category:
+          type: string
+        operation_reason_explanation:
+          type: string
+        operation_reason_external_ref:
+          type: string
+    Page:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Application"
+        next_cursor:
+          type: string
+          description: Opaque keyset position; empty on the last page
+    NodeGroupPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeGroup"
+        next_cursor:
+          type: string
+    AssignmentPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Assignment"
+        next_cursor:
+          type: string
+    NodePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+        next_cursor:
+          type: string
+    AuditEventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        next_cursor:
+          type: string
     Error:
       type: object
       required: [error, code]

@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../../lib/api";
+import { useCursorPage } from "../use-cursor-page";
 import { API_PATHS } from "../../lib/constants/api-paths";
 
 export interface NodeGroup {
@@ -9,8 +8,7 @@ export interface NodeGroup {
 }
 
 export function useNodeGroups() {
-  return useQuery({
-    queryKey: ["node-groups"],
-    queryFn: () => apiGet<NodeGroup[]>(API_PATHS.nodeGroups),
-  });
+  return useCursorPage<NodeGroup>(["node-groups"], (cursor) =>
+    `${API_PATHS.nodeGroups}?${cursor ? `cursor=${cursor}` : ""}`,
+  );
 }

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -85,10 +84,7 @@ func TestPerAssignmentConvergenceAndNodeState(t *testing.T) {
 
 func nodeState(t *testing.T, res result) string {
 	t.Helper()
-	var rows []map[string]any
-	if err := json.Unmarshal(res.raw, &rows); err != nil {
-		t.Fatal(err)
-	}
+	rows := parsePage(t, res.raw)
 	if len(rows) != 1 {
 		t.Fatalf("expected one node, got %d", len(rows))
 	}

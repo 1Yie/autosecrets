@@ -1,9 +1,14 @@
-import { useAuditEvents } from "../../hooks/audit/use-audit-events";
+import { useState } from "react";
+import { useAuditEvents, type AuditFilters } from "../../hooks/audit/use-audit-events";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
+
+const reasonCategories = ["maintenance", "incident_response", "access_change", "configuration_correction", "other"];
 
 export function AuditPage() {
   const audit = useAuditEvents();
+  const [draft, setDraft] = useState<AuditFilters>(audit.filters);
 
   if (audit.isLoading) {
     return (
@@ -28,8 +33,42 @@ export function AuditPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">审计</h1>
-      {audit.data.length === 0 ? (
-        <p className="text-sm opacity-60">暂无审计事件。</p>
+      <form
+        className="flex flex-wrap items-end gap-2 text-sm"
+        onSubmit={(event) => {
+          event.preventDefault();
+          audit.applyFilters(draft);
+        }}
+        data-testid="audit-filters"
+      >
+        <FilterInput label="操作者" value={draft.actor} onChange={(v) => setDraft({ ...draft, actor: v })} testId="filter-actor" />
+        <FilterInput label="动作" value={draft.action} onChange={(v) => setDraft({ ...draft, action: v })} testId="filter-action" />
+        <FilterInput label="资源" value={draft.resource} onChange={(v) => setDraft({ ...draft, resource: v })} testId="filter-resource" />
+        <label className="flex flex-col gap-1">
+          <span className="opacity-60">结果</span>
+          <select className="rounded border px-2 py-1" data-testid="filter-outcome" value={draft.outcome} onChange={(e) => setDraft({ ...draft, outcome: e.target.value })}>
+            <option value="">全部</option>
+            <option value="ok">ok</option>
+            <option value="denied">denied</option>
+            <option value="failed">failed</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="opacity-60">原因类别</span>
+          <select className="rounded border px-2 py-1" data-testid="filter-reason" value={draft.reason_category} onChange={(e) => setDraft({ ...draft, reason_category: e.target.value })}>
+            <option value="">全部</option>
+            {reasonCategories.map((category) => (
+              <option key={category} value={category}>{category}</option>
+            ))}
+          </select>
+        </label>
+        <Button variant="default" size="sm" type="submit">
+          应用筛选
+        </Button>
+      </form>
+
+      {audit.items.length === 0 ? (
+        <p className="text-sm opacity-60">暂无匹配的审计事件。</p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full text-sm">
@@ -38,29 +77,51 @@ export function AuditPage() {
                 <th className="px-3 py-2 font-medium">时间</th>
                 <th className="px-3 py-2 font-medium">操作者</th>
                 <th className="px-3 py-2 font-medium">动作</th>
-                <th className="px-3 py-2 font-medium">资源</th>
                 <th className="px-3 py-2 font-medium">结果</th>
+                <th className="px-3 py-2 font-medium">原因</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {audit.data.map((event) => (
+              {audit.items.map((event) => (
                 <tr key={event.id}>
                   <td className="whitespace-nowrap px-3 py-2 opacity-60">
                     {new Date(event.created_at).toLocaleString()}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs">{event.actor}</td>
+                  <td className="px-3 py-2 font-mono text-xs">{event.actor_display || event.actor}</td>
                   <td className="px-3 py-2">{event.action}</td>
-                  <td className="max-w-48 truncate px-3 py-2 font-mono text-xs opacity-70">
-                    {event.resource}
+                  <td className="px-3 py-2">{event.outcome || event.result}</td>
+                  <td className="max-w-48 truncate px-3 py-2 opacity-70">
+                    {event.operation_reason_category || "—"}
                   </td>
-                  <td className="px-3 py-2">{event.result}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      <div className="flex items-center gap-2 text-sm">
+        <Button variant="outline" size="sm" disabled={audit.isFirstPage} onClick={audit.prev}>
+          上一页
+        </Button>
+        <Button variant="outline" size="sm" disabled={!audit.nextCursor} onClick={audit.next}>
+          下一页
+        </Button>
+      </div>
     </div>
+  );
+}
+
+function FilterInput({ label, value, onChange, testId }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  testId: string;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="opacity-60">{label}</span>
+      <Input className="w-40" value={value} onChange={(event) => onChange(event.target.value)} data-testid={testId} />
+    </label>
   );
 }
 

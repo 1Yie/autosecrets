@@ -9,6 +9,7 @@ import { ErrorBoundary } from "../../components/error-boundary";
 import type { ManagedNode } from "../../hooks/fleet/use-nodes";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Button } from "../../components/ui/button";
 
 export function NodesPage() {
   const nodes = useNodes();
@@ -26,7 +27,15 @@ export function NodesPage() {
         <h2 className="font-semibold">托管节点</h2>
         {nodes.isLoading && <Skeleton className="h-24 w-full" />}
         {nodes.isError && <p className="text-sm text-red-500">Nodes 加载失败</p>}
-        <NodeTable nodes={nodes.data ?? []} />
+        <NodeTable nodes={nodes.items} />
+        <div className="mt-2 flex items-center gap-2 text-sm">
+          <Button variant="outline" size="sm" disabled={nodes.isFirstPage} onClick={nodes.prev}>
+            上一页
+          </Button>
+          <Button variant="outline" size="sm" disabled={!nodes.nextCursor} onClick={nodes.next}>
+            下一页
+          </Button>
+        </div>
       </section>
 
       <section className="rounded border p-4">
@@ -35,14 +44,14 @@ export function NodesPage() {
         {groups.isLoading && <Skeleton className="h-8 w-48" />}
         {groups.isError && <p className="text-sm text-red-500">Node groups 加载失败</p>}
         <ul className="mt-2 space-y-1 text-sm">
-          {groups.data?.map((g) => (
-            <NodeGroupRow key={g.id} group={g} nodes={nodes.data ?? []} />
+          {groups.items.map((g) => (
+            <NodeGroupRow key={g.id} group={g} nodes={nodes.items} />
           ))}
         </ul>
       </section>
 
       <ErrorBoundary>
-        <AssignmentForm groups={groups.data ?? []} assignments={assignments} />
+        <AssignmentForm groups={groups.items} assignments={assignments} />
       </ErrorBoundary>
     </div>
   );

@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../../lib/api";
+import { useCursorPage } from "../use-cursor-page";
 import { API_PATHS } from "../../lib/constants/api-paths";
 
 export interface ManagedNode {
@@ -14,9 +13,7 @@ export interface ManagedNode {
 }
 
 export function useNodes() {
-  return useQuery({
-    queryKey: ["nodes"],
-    queryFn: () => apiGet<ManagedNode[]>(API_PATHS.nodes),
-    refetchInterval: 10_000,
-  });
+  return useCursorPage<ManagedNode>(["nodes"], (cursor) =>
+    `${API_PATHS.nodes}?${cursor ? `cursor=${cursor}` : ""}`,
+  );
 }

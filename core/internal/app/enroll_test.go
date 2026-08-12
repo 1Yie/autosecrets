@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"net/http"
 	"os"
@@ -84,10 +83,7 @@ func TestInstallCommandAndEnrollment(t *testing.T) {
 	}
 
 	nodes := ta.do(t, "GET", "/api/v1/nodes", nil, cookie, "")
-	var nodeList []map[string]any
-	if err := json.Unmarshal(nodes.raw, &nodeList); err != nil {
-		t.Fatal(err)
-	}
+	nodeList := parsePage(t, nodes.raw)
 	if len(nodeList) != 1 {
 		t.Fatalf("nodes: %s", nodes.raw)
 	}

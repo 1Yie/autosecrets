@@ -1,5 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../../lib/api";
+import { useCursorPage } from "../use-cursor-page";
 import { API_PATHS } from "../../lib/constants/api-paths";
 
 export interface Assignment {
@@ -14,8 +13,7 @@ export interface Assignment {
 }
 
 export function useAssignments() {
-  return useQuery({
-    queryKey: ["assignments"],
-    queryFn: () => apiGet<Assignment[]>(API_PATHS.assignments),
-  });
+  return useCursorPage<Assignment>(["assignments"], (cursor) =>
+    `${API_PATHS.assignments}?${cursor ? `cursor=${cursor}` : ""}`,
+  );
 }

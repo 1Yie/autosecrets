@@ -140,6 +140,7 @@ func (a *App) Handler() http.Handler {
 	mux.Handle("PUT "+a.managementBase+"/applications/{appID}/environments/{envID}/activation-policy", a.requireSession(http.HandlerFunc(a.handlePutActivationPolicy)))
 	mux.Handle("GET "+a.managementBase+"/nodes", a.requireSession(http.HandlerFunc(a.handleListNodes)))
 	mux.Handle("GET "+a.managementBase+"/overview", a.requireSession(http.HandlerFunc(a.handleOverview)))
+	mux.Handle("GET "+a.managementBase+"/search", a.requireSession(http.HandlerFunc(a.handleSearch)))
 	mux.Handle("POST "+a.managementBase+"/nodes/install-command", a.requireSession(http.HandlerFunc(a.handleInstallCommand)))
 	mux.Handle("GET "+a.managementBase+"/audit-events", a.requireSession(http.HandlerFunc(a.handleListAudit)))
 

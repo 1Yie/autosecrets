@@ -4,12 +4,10 @@ import { z } from "zod";
 import { useCreateAssignment } from "../../hooks/fleet/use-create-assignment";
 import { useApplications } from "../../hooks/applications/use-applications";
 import { useApplication } from "../../hooks/applications/use-application";
-import type { UseQueryResult } from "@tanstack/react-query";
 import type { Assignment } from "../../hooks/fleet/use-assignments";
 import type { NodeGroup } from "../../hooks/fleet/use-node-groups";
 import { Button } from "../../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
-import { Skeleton } from "../../components/ui/skeleton";
 
 const assignmentSchema = z.object({
   group_id: z.string().min(1, "请选择节点组"),
@@ -21,7 +19,7 @@ type AssignmentFormValues = z.infer<typeof assignmentSchema>;
 
 interface AssignmentFormProps {
   groups: NodeGroup[];
-  assignments: UseQueryResult<Assignment[], Error>;
+  assignments: { items: Assignment[] };
 }
 
 /** Bundle Assignment (ADR-0018): relates a Node Group to a Secret Bundle
@@ -75,7 +73,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
                 <SelectValue placeholder="选择应用…" />
               </SelectTrigger>
               <SelectContent>
-                {applications.data?.map((app) => (
+                {applications.items.map((app) => (
                   <SelectItem key={app.id} value={app.id}>{app.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -112,10 +110,8 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
           {String((createAssignment.error as Error).message)}
         </p>
       )}
-      {assignments.isLoading && <Skeleton className="mt-2 h-4 w-40" />}
-      {assignments.isError && <p className="mt-1 text-sm text-red-500">Assignments 加载失败</p>}
       <ul className="mt-2 space-y-1 text-sm">
-        {assignments.data?.map((a) => (
+        {assignments.items.map((a) => (
           <li key={a.id} className="font-mono">
             {a.group_name} ← {a.application_id.slice(0, 8)}/{a.environment_id.slice(0, 8)}
           </li>
