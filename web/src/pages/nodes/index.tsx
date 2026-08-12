@@ -26,7 +26,7 @@ export function NodesPage() {
       <section className="rounded border p-4">
         <h2 className="font-semibold">托管节点</h2>
         {nodes.isLoading && <Skeleton className="h-24 w-full" />}
-        {nodes.isError && <p className="text-sm text-red-500">Nodes 加载失败</p>}
+        {nodes.isError && <p className="text-sm text-red-500">节点列表加载失败</p>}
         <NodeTable nodes={nodes.items} />
         <div className="mt-2 flex items-center gap-2 text-sm">
           <Button variant="outline" size="sm" disabled={nodes.isFirstPage} onClick={nodes.prev}>
@@ -42,7 +42,7 @@ export function NodesPage() {
         <h2 className="font-semibold">节点组</h2>
         <CreateNodeGroupForm />
         {groups.isLoading && <Skeleton className="h-8 w-48" />}
-        {groups.isError && <p className="text-sm text-red-500">Node groups 加载失败</p>}
+        {groups.isError && <p className="text-sm text-red-500">节点组加载失败</p>}
         <ul className="mt-2 space-y-1 text-sm">
           {groups.items.map((g) => (
             <NodeGroupRow key={g.id} group={g} nodes={nodes.items} />
@@ -63,9 +63,9 @@ function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
       <TableHeader>
         <TableRow className="border-b opacity-60">
           <TableHead className="p-2">名称</TableHead>
-          <TableHead className="p-2">Observed</TableHead>
-          <TableHead className="p-2">Last result</TableHead>
-          <TableHead className="p-2">Last seen</TableHead>
+          <TableHead className="p-2">已同步版本</TableHead>
+          <TableHead className="p-2">最近结果</TableHead>
+          <TableHead className="p-2">最后在线</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

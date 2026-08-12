@@ -44,9 +44,9 @@ export function RevisionsPanel({ appId, envId }: { appId: string; envId: string 
 
   return (
     <section className="rounded border p-4">
-      <h2 className="font-semibold">修订历史</h2>
+      <h2 className="font-semibold">版本历史</h2>
       {revisions.isLoading && <Skeleton className="h-4 w-48" />}
-      {revisions.isError && <p className="text-sm text-red-500">Revisions 加载失败</p>}
+      {revisions.isError && <p className="text-sm text-red-500">版本历史加载失败</p>}
 
       {target && (
         <div className="mt-3 space-y-2 rounded border p-3">
@@ -61,7 +61,7 @@ export function RevisionsPanel({ appId, envId }: { appId: string; envId: string 
           ) : (
             <form onSubmit={form.handleSubmit(onRollback)} data-testid="rollback-form">
               <p className="text-sm">
-                回滚到 <span className="font-mono">{target.slice(0, 8)}…</span>：将创建新的不可变修订，历史不会被改写。
+                回滚到 <span className="font-mono">{target.slice(0, 8)}…</span>：将生成一个新版本恢复当时的文件内容，历史记录不会被改写。
               </p>
               <div className="mt-2 space-y-2">
                 <OperationReasonFields register={form.register} errors={form.formState.errors} />

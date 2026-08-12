@@ -39,20 +39,20 @@ export function DraftPanel({ appId, envId }: { appId: string; envId: string }) {
 
   return (
     <section className="rounded border p-4">
-      <h2 className="font-semibold">草稿（v{draft.data?.version ?? "…"}）</h2>
-      {draft.isError && <p className="text-sm text-red-500">Draft 加载失败</p>}
+      <h2 className="font-semibold">待发布内容（版本 {draft.data?.version ?? "…"}）</h2>
+      {draft.isError && <p className="text-sm text-red-500">待发布内容加载失败</p>}
       <ul className="mt-2 space-y-1 text-sm">
         {draft.data?.selections.map((sel) => (
           <li key={sel.secret_id} className="flex items-center gap-2">
             <span className="font-mono">{sel.name}</span>
-            <span className="opacity-60">seq {sel.version_seq}</span>
+            <span className="opacity-60">版本 {sel.version_seq}</span>
           </li>
         ))}
       </ul>
 
       {!open ? (
         <Button variant="default" className="mt-3" disabled={publish.isPending} onClick={() => setOpen(true)}>
-          发布修订
+          发布
         </Button>
       ) : stepUpNeeded ? (
         <div className="mt-3 space-y-2">
@@ -73,14 +73,16 @@ export function DraftPanel({ appId, envId }: { appId: string; envId: string }) {
           onSubmit={form.handleSubmit(onPublish)}
           data-testid="publish-form"
         >
-          <p className="text-xs opacity-70">发布将更新 Desired State；节点随后异步收敛。</p>
+          <p className="text-xs opacity-70">
+            发布后，已分配的节点会在下次轮询时自动同步新版本（通常 15 秒内开始）。
+          </p>
           <OperationReasonFields register={form.register} errors={form.formState.errors} />
           {publish.isError && !stepUpNeeded && (
             <p className="text-sm text-red-500">{String((publish.error as Error).message)}</p>
           )}
           <div className="flex gap-2">
             <Button variant="default" type="submit" disabled={publish.isPending || !form.formState.isValid}>
-              确认发布
+          确认发布
             </Button>
             <Button variant="outline" type="button" onClick={() => setOpen(false)}>
               取消
@@ -90,7 +92,7 @@ export function DraftPanel({ appId, envId }: { appId: string; envId: string }) {
       )}
       {publish.isSuccess && !open && (
         <p className="mt-1 text-sm text-green-600" data-testid="publish-success">
-          Desired State 已更新（{publish.data?.id.slice(0, 8)}…）
+          已更新下发目标版本（{publish.data?.id.slice(0, 8)}…），节点将自动同步
         </p>
       )}
     </section>

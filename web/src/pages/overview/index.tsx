@@ -4,11 +4,11 @@ import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
 
 const attentionLabels: Record<string, string> = {
-  failed_convergence: "收敛失败",
+  failed_convergence: "密钥同步失败",
   offline_node: "节点离线",
   unassigned_node: "未分配节点",
   unclassified_environment: "未分类环境",
-  cleanup_failed: "清理失败",
+  cleanup_failed: "卸载清理失败",
   cleanup_unconfirmed: "清理未确认",
 };
 
@@ -91,9 +91,9 @@ export function OverviewPage() {
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium">最近发布</h2>
+        <h2 className="text-sm font-medium">最近更新</h2>
         {data.recent_publishes.length === 0 ? (
-          <p className="text-sm opacity-60">暂无发布记录。</p>
+          <p className="text-sm opacity-60">暂无更新记录。</p>
         ) : (
           <ul className="divide-y rounded-lg border text-sm">
             {data.recent_publishes.map((revision) => (

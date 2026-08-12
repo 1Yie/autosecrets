@@ -19,7 +19,7 @@ describe("DraftPanel", () => {
       </Wrapper>,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "发布修订" }));
+    await user.click(screen.getByRole("button", { name: "发布" }));
     const confirm = screen.getByRole("button", { name: "确认发布" });
     expect(confirm).toBeDisabled();
 
@@ -66,7 +66,7 @@ describe("DraftPanel", () => {
       </Wrapper>,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "发布修订" }));
+    await user.click(screen.getByRole("button", { name: "发布" }));
     await user.type(screen.getByTestId("reason-explanation"), "rotate the database password");
     await user.click(screen.getByRole("button", { name: "确认发布" }));
 

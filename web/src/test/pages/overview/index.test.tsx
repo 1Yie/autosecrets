@@ -13,7 +13,7 @@ describe("OverviewPage", () => {
     );
     expect(await screen.findByText("概览")).toBeVisible();
     expect(screen.getByText("应用")).toBeVisible();
-    expect(screen.getByText("收敛失败")).toBeVisible();
+    expect(screen.getByText("密钥同步失败")).toBeVisible();
     expect(screen.getByTestId("generated-at")).toBeVisible();
   });
 });
