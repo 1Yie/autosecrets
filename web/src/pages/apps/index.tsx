@@ -1,6 +1,7 @@
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link } from "react-router-dom";
 import { useApplications } from "../../hooks/applications/use-applications";
 import { useCreateApplication } from "../../hooks/applications/use-create-application";
 import { nameSchema } from "../../lib/constants/schemas";
@@ -8,12 +9,17 @@ import { z } from "zod";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
+import {
+  Dialog, DialogClose, DialogDescription, DialogFooter,
+  DialogHeader, DialogPanel, DialogPopup, DialogTitle, DialogTrigger,
+} from "../../components/ui/dialog";
 
 const createAppSchema = z.object({ name: nameSchema });
 
 export function AppsPage() {
   const apps = useApplications();
   const create = useCreateApplication();
+  const [open, setOpen] = useState(false);
   const {
     register,
     handleSubmit,
@@ -23,16 +29,60 @@ export function AppsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold">应用</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">应用</h1>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger render={<Button variant="default" />}>新建应用</DialogTrigger>
+          <DialogPopup>
+            <DialogHeader>
+              <DialogTitle>新建应用</DialogTitle>
+              <DialogDescription>应用是密钥的顶层分组。</DialogDescription>
+            </DialogHeader>
+            <form
+              className="contents"
+              onSubmit={handleSubmit((values) => {
+                create.mutate(values.name, {
+                  onSuccess: () => {
+                    setOpen(false);
+                    reset();
+                  },
+                });
+              })}
+            >
+              <DialogPanel>
+                <div className="space-y-3">
+                  <Input
+                    className="w-full"
+                    placeholder="应用名称"
+                    data-testid="app-name"
+                    {...register("name")}
+                  />
+                  {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
+                  {create.isError && (
+                    <p className="text-sm text-red-500">{String((create.error as Error).message)}</p>
+                  )}
+                </div>
+              </DialogPanel>
+              <DialogFooter>
+                <DialogClose render={<Button variant="ghost" />}>取消</DialogClose>
+                <Button variant="default" type="submit" disabled={create.isPending}>
+                  创建
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogPopup>
+        </Dialog>
+      </div>
+
       {apps.isLoading && (
         <div className="space-y-2">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
       )}
-      {apps.isError && <p className="text-red-500">应用加载失败</p>}
+      {apps.isError && <p className="text-sm text-red-500">应用加载失败</p>}
       {apps.items.length === 0 && !apps.isLoading && (
-        <p className="opacity-60">还没有应用，创建一个开始。</p>
+        <p className="opacity-60">还没有应用，点右上角「新建应用」开始。</p>
       )}
       <ul className="space-y-2">
         {apps.items.map((app) => (
@@ -43,22 +93,6 @@ export function AppsPage() {
           </li>
         ))}
       </ul>
-      <form
-        className="flex gap-2"
-        onSubmit={handleSubmit((v) => {
-          create.mutate(v.name);
-          reset();
-        })}
-      >
-        <Input className="flex-1"
-          placeholder="应用名称"
-          data-testid="app-name"
-          {...register("name")} />
-        {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
-        <Button variant="default"  type="submit">
-          创建
-        </Button>
-      </form>
       <div className="flex items-center gap-2 text-sm">
         <Button variant="outline" size="sm" disabled={apps.isFirstPage} onClick={apps.prev}>
           上一页
@@ -70,6 +104,5 @@ export function AppsPage() {
     </div>
   );
 }
-
 
 export default AppsPage;
