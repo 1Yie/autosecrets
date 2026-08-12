@@ -25,7 +25,7 @@ export function NodesPage() {
         <InstallCommandCard />
       </ErrorBoundary>
 
-      <section className="rounded border p-4">
+      <section className="space-y-2">
         <h2 className="font-semibold">托管节点</h2>
         {nodes.isLoading && <Skeleton className="h-24 w-full" />}
         {nodes.isError && <p className="text-sm text-red-500">节点列表加载失败</p>}
@@ -51,7 +51,7 @@ export function NodesPage() {
         )}
       </section>
 
-      <section className="rounded border p-4">
+      <section className="space-y-2">
         <h2 className="font-semibold">节点组</h2>
         <CreateNodeGroupForm />
         {groups.isLoading && <Skeleton className="h-8 w-48" />}

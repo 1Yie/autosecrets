@@ -41,7 +41,7 @@ export function AssignmentForm({ groups, assignments }: AssignmentFormProps) {
   const app = useApplication(appId);
 
   return (
-    <section className="rounded border p-4">
+    <section>
       <h2 className="font-semibold">分配</h2>
       <form
         className="mt-2 flex flex-wrap gap-2 text-sm"

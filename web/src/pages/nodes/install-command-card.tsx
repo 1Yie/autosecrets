@@ -21,7 +21,7 @@ export function InstallCommandCard() {
   const parsed = install.data ? parseInstallCommand(install.data.command) : null;
 
   return (
-    <section className="rounded border p-4">
+    <section>
       <h2 className="font-semibold">添加服务器</h2>
       <p className="mt-1 text-sm opacity-70">
         生成一次性安装命令，在目标服务器上执行后，密钥将自动同步到
