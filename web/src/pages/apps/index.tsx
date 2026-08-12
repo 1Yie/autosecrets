@@ -9,7 +9,6 @@ import { z } from "zod";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
-import { Frame, FrameFooter } from "../../components/ui/frame";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import {
   Dialog, DialogClose, DialogDescription, DialogFooter,
@@ -87,7 +86,7 @@ export function AppsPage() {
         <p className="opacity-60">还没有应用，点右上角「新建应用」开始。</p>
       )}
       {apps.items.length > 0 && (
-        <Frame className="w-full">
+        <>
           <Table variant="card">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -110,22 +109,20 @@ export function AppsPage() {
               ))}
             </TableBody>
           </Table>
-          <FrameFooter className="p-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-muted-foreground text-sm">
-                共 <strong className="font-medium text-foreground">{apps.items.length}</strong> 个应用
-              </p>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" disabled={apps.isFirstPage} onClick={apps.prev}>
-                  上一页
-                </Button>
-                <Button variant="outline" size="sm" disabled={!apps.nextCursor} onClick={apps.next}>
-                  下一页
-                </Button>
-              </div>
+          <div className="mt-2 flex items-center justify-between gap-2 text-sm">
+            <p className="text-muted-foreground">
+              共 <strong className="font-medium text-foreground">{apps.items.length}</strong> 个应用
+            </p>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={apps.isFirstPage} onClick={apps.prev}>
+                上一页
+              </Button>
+              <Button variant="outline" size="sm" disabled={!apps.nextCursor} onClick={apps.next}>
+                下一页
+              </Button>
             </div>
-          </FrameFooter>
-        </Frame>
+          </div>
+        </>
       )}
     </div>
   );
