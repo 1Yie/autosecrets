@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseInstallCommand } from "./command";
+import { parseInstallCommand } from "../../../lib/utils/command";
 
 describe("parseInstallCommand", () => {
   it("extracts server, token, and quoted name", () => {

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
-import { server } from "../../test/server";
-import { useLogin } from "./use-login";
-import { useSessionStore } from "../../stores/session-store";
+import { server } from "../../server";
+import { useLogin } from "../../../hooks/auth/use-login";
+import { useSessionStore } from "../../../stores/session-store";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({

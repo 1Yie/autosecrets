@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { useSessionStore } from "./session-store";
+import { useSessionStore } from "../../stores/session-store";
 
 describe("session store", () => {
   beforeEach(() => useSessionStore.getState().clearSession());

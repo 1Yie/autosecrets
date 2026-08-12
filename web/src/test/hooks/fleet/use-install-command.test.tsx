@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useInstallCommand } from "./use-install-command";
+import { useInstallCommand } from "../../../hooks/fleet/use-install-command";
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({
