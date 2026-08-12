@@ -33,6 +33,17 @@ The Web application uses React and TypeScript. These rules apply to all frontend
 - Keep pure, exported utility functions under `src/lib/utils/` and cover them with unit tests.
 - Read environment variables only through typed exports under `src/lib/env/`; components must not read environment variables directly.
 
+## Routing
+
+- Centralize route definitions in `src/router/index.ts` using
+  `createBrowserRouter` with a `RouterProvider`; do not inline `<Routes>`
+  in App components.
+- Load page components with `React.lazy` per route so the initial bundle only
+  contains the current page.
+- Mount the route-level Error Boundary through each route's `errorElement`;
+  feature-level boundaries still wrap independently failing sections.
+- `App` remains a layout shell (navigation, error boundaries, route outlet).
+
 ## Errors and async states
 
 - Place Error Boundaries at route and feature boundaries so one failure does not crash the whole application.

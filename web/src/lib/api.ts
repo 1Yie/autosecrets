@@ -1,18 +1,14 @@
-// Transport layer: same-origin fetch with cookie sessions and the CSRF
-// header required by Core for every mutation. No server state lives here;
-// TanStack Query owns that in the feature hooks.
+// Transport layer: the only place that touches fetch. Components and Hooks
+// go through TanStack Query wrappers; the CSRF token lives in the Zustand
+// session store and is attached to every mutation.
+import { useSessionStore } from "../stores/session-store";
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
     super(message);
     this.status = status;
   }
-}
-
-let csrfToken = "";
-
-export function setCsrfToken(token: string) {
-  csrfToken = token;
 }
 
 export async function api<T = unknown>(
@@ -22,7 +18,10 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  if (method !== "GET") {
+    const csrfToken = useSessionStore.getState().csrfToken;
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  }
   const res = await fetch(path, {
     method,
     headers,
@@ -50,3 +49,4 @@ export async function api<T = unknown>(
 export const apiGet = <T>(path: string) => api<T>("GET", path);
 export const apiPost = <T>(path: string, body?: unknown) => api<T>("POST", path, body);
 export const apiPut = <T>(path: string, body?: unknown) => api<T>("PUT", path, body);
+export const apiDelete = <T>(path: string) => api<T>("DELETE", path);

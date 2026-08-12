@@ -1,11 +1,22 @@
-import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { Link } from "react-router-dom";
-import { useApplications, useCreateApplication } from "../hooks/useApps";
+import { useApplications } from "../hooks/applications/use-applications";
+import { useCreateApplication } from "../hooks/applications/use-create-application";
+import { nameSchema } from "../lib/constants/schemas";
+import { z } from "zod";
+
+const createAppSchema = z.object({ name: nameSchema });
 
 export function AppsPage() {
   const apps = useApplications();
   const create = useCreateApplication();
-  const [name, setName] = useState("");
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<{ name: string }>({ resolver: zodResolver(createAppSchema) });
 
   return (
     <div className="space-y-4">
@@ -26,21 +37,18 @@ export function AppsPage() {
       </ul>
       <form
         className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) {
-            create.mutate(name.trim());
-            setName("");
-          }
-        }}
+        onSubmit={handleSubmit((v) => {
+          create.mutate(v.name);
+          reset();
+        })}
       >
         <input
           className="flex-1 rounded border p-2"
           placeholder="Application name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
           data-testid="app-name"
+          {...register("name")}
         />
+        {errors.name && <p className="text-sm text-red-500">{errors.name.message}</p>}
         <button className="rounded bg-amber-500 px-4 font-semibold" type="submit">
           Create
         </button>
@@ -48,3 +56,6 @@ export function AppsPage() {
     </div>
   );
 }
+
+
+export default AppsPage;

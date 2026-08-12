@@ -387,3 +387,23 @@ Recorded at the end of the implementation session for
 - Agent tests: same container, then `.venv/bin/python -m pytest tests/` in
   `agent/` (integration suite skips without the container).
 - E2E: `scripts/run-e2e.sh` (starts Core, devproxy, vite, and Playwright).
+
+
+## Frontend guidelines refactor (grilled decisions)
+
+Recorded after the grilling session that confirmed the frontend refactor
+against [frontend-guidelines.md](./frontend-guidelines.md).
+
+- Full refactor of the Web app: kebab-case files, feature-folder Hooks
+  (`src/hooks/<feature>/use-*.ts`), all forms on React Hook Form + Zod,
+  Zustand session store for the CSRF token, route-level plus feature-level
+  Error Boundaries, centralized `src/router/index.ts` data router with
+  per-route `React.lazy`, constants under `src/lib/constants/`, and minimal
+  component splits.
+- Watermelon UI adoption is deferred: its registry endpoints return SPA HTML
+  instead of the expected component JSON in this environment (verified with
+  `shadcn add` and direct requests), so the existing shadcn primitives and
+  plain elements stay until the registry is reachable. Revisit when the
+  registry serves `index.json` / component manifests.
+- Acceptance: lint, typecheck, build, Vitest, Agent integration, and the
+  Playwright E2E stay green throughout; UI behavior is unchanged.

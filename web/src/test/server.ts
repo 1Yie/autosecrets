@@ -14,7 +14,7 @@ export const handlers = [
   http.post("/api/v1/nodes/install-command", () =>
     HttpResponse.json({
       command:
-        "curl -fsSL https://agent.example.com/agent/v1/install.sh | sudo bash -s -- --server https://agent.example.com --token one-time-token-abc",
+        'curl -fsSL https://agent.example.com/agent/v1/install.sh | sudo bash -s -- --server https://agent.example.com --token one-time-token-abc --name "web-1"',
       expires_at: "2026-08-12T02:00:00Z",
     }),
   ),

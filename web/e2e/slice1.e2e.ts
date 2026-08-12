@@ -21,15 +21,6 @@ const PROXY_URL = process.env.E2E_PROXY_URL ?? "https://localhost:18443";
 const KEY_DIR = process.env.E2E_KEYS ?? "";
 const BOOTSTRAP_CODE = process.env.E2E_BOOTSTRAP_CODE ?? "";
 
-async function api(method: string, path: string, body?: unknown) {
-  const res = await fetch(CORE_URL + path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  return { status: res.status, body: await res.json() };
-}
-
 test("bootstrap to secret landing", async ({ page }) => {
   test.skip(!KEY_DIR || !BOOTSTRAP_CODE, "E2E stack not configured");
   const nodeName = "e2e-node";
