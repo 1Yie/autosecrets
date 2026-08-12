@@ -405,5 +405,10 @@ against [frontend-guidelines.md](./frontend-guidelines.md).
   `shadcn add` and direct requests), so the existing shadcn primitives and
   plain elements stay until the registry is reachable. Revisit when the
   registry serves `index.json` / component manifests.
+- The readiness condition is now operationalized: `scripts/watermelon_registry_check.py`
+  (with unit tests) passes only when the registry serves a JSON manifest,
+  and `scripts/run-e2e.sh`-independent CI job reports it as a non-blocking
+  check. As of the adoption spec implementation, the gate reports NOT READY,
+  so the migration has not started and the fallback remains in force.
 - Acceptance: lint, typecheck, build, Vitest, Agent integration, and the
   Playwright E2E stay green throughout; UI behavior is unchanged.
