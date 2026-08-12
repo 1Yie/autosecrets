@@ -82,7 +82,7 @@ export function AuditPage() {
       {audit.items.length === 0 ? (
         <p className="text-sm opacity-60">暂无匹配的审计事件。</p>
       ) : (
-        <Table className="w-full">
+        <Table variant="card" className="w-full">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>时间</TableHead>

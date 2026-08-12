@@ -76,7 +76,7 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
 
       {secrets.isLoading && <Skeleton className="h-24 w-full" />}
       {secrets.isError && <p className="text-sm text-red-500">密钥列表加载失败</p>}
-      <Table className="w-full text-left text-sm">
+      <Table variant="card" className="w-full text-left text-sm">
         <TableHeader>
           <TableRow className="border-b opacity-60">
             <TableHead className="p-2">名称</TableHead>

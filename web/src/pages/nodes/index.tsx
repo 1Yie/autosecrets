@@ -69,7 +69,7 @@ export function NodesPage() {
 
 function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
   return (
-    <Table>
+    <Table variant="card">
       <TableHeader>
         <TableRow className="border-b opacity-60">
           <TableHead className="p-2">名称</TableHead>
