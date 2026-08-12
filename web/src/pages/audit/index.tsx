@@ -47,7 +47,7 @@ export function AuditPage() {
         <FilterInput label="资源" value={draft.resource} onChange={(v) => setDraft({ ...draft, resource: v })} testId="filter-resource" />
         <label className="flex flex-col gap-1">
           <span className="opacity-60">结果</span>
-          <Select value={draft.outcome || "all"} onValueChange={(v) => setDraft({ ...draft, outcome: v === "all" ? "" : v })}>
+          <Select value={draft.outcome || "all"} onValueChange={(v) => setDraft({ ...draft, outcome: v === "all" ? "" : v ?? "" })}>
             <SelectTrigger className="w-28" data-testid="filter-outcome">
               <SelectValue />
             </SelectTrigger>
@@ -61,7 +61,7 @@ export function AuditPage() {
         </label>
         <label className="flex flex-col gap-1">
           <span className="opacity-60">原因类别</span>
-          <Select value={draft.reason_category || "all"} onValueChange={(v) => setDraft({ ...draft, reason_category: v === "all" ? "" : v })}>
+          <Select value={draft.reason_category || "all"} onValueChange={(v) => setDraft({ ...draft, reason_category: v === "all" ? "" : v ?? "" })}>
             <SelectTrigger className="w-40" data-testid="filter-reason">
               <SelectValue />
             </SelectTrigger>
