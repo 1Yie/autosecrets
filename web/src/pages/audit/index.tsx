@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Frame, FrameFooter } from "../../components/ui/frame";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
 const reasonCategories = ["maintenance", "incident_response", "access_change", "configuration_correction", "other"];
@@ -82,41 +83,50 @@ export function AuditPage() {
       {audit.items.length === 0 ? (
         <p className="text-sm opacity-60">暂无匹配的审计事件。</p>
       ) : (
-        <Table variant="card" className="w-full">
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead>时间</TableHead>
-              <TableHead>操作者</TableHead>
-              <TableHead>动作</TableHead>
-              <TableHead>结果</TableHead>
-              <TableHead>原因</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {audit.items.map((event) => (
-              <TableRow key={event.id}>
-                <TableCell className="whitespace-nowrap text-muted-foreground">
-                  {new Date(event.created_at).toLocaleString()}
-                </TableCell>
-                <TableCell className="font-mono text-xs">{event.actor_display || event.actor}</TableCell>
-                <TableCell>{event.action}</TableCell>
-                <TableCell>{event.outcome || event.result}</TableCell>
-                <TableCell className="max-w-48 truncate text-muted-foreground">
-                  {event.operation_reason_category || "—"}
-                </TableCell>
+        <Frame className="w-full">
+          <Table variant="card" className="w-full">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>时间</TableHead>
+                <TableHead>操作者</TableHead>
+                <TableHead>动作</TableHead>
+                <TableHead>结果</TableHead>
+                <TableHead>原因</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {audit.items.map((event) => (
+                <TableRow key={event.id}>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {new Date(event.created_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{event.actor_display || event.actor}</TableCell>
+                  <TableCell>{event.action}</TableCell>
+                  <TableCell>{event.outcome || event.result}</TableCell>
+                  <TableCell className="max-w-48 truncate text-muted-foreground">
+                    {event.operation_reason_category || "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <FrameFooter className="p-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-muted-foreground text-sm">
+                共 <strong className="font-medium text-foreground">{audit.items.length}</strong> 条事件
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={audit.isFirstPage} onClick={audit.prev}>
+                  上一页
+                </Button>
+                <Button variant="outline" size="sm" disabled={!audit.nextCursor} onClick={audit.next}>
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </FrameFooter>
+        </Frame>
       )}
-      <div className="flex items-center gap-2 text-sm">
-        <Button variant="outline" size="sm" disabled={audit.isFirstPage} onClick={audit.prev}>
-          上一页
-        </Button>
-        <Button variant="outline" size="sm" disabled={!audit.nextCursor} onClick={audit.next}>
-          下一页
-        </Button>
-      </div>
     </div>
   );
 }

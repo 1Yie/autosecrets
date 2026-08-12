@@ -13,6 +13,7 @@ import { ErrorBoundary } from "../../components/error-boundary";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { Frame } from "../../components/ui/frame";
 import {
   Dialog, DialogClose, DialogDescription, DialogFooter,
   DialogHeader, DialogPanel, DialogPopup, DialogTitle, DialogTrigger,
@@ -76,32 +77,34 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
 
       {secrets.isLoading && <Skeleton className="h-24 w-full" />}
       {secrets.isError && <p className="text-sm text-red-500">密钥列表加载失败</p>}
-      <Table variant="card" className="w-full text-left text-sm">
-        <TableHeader>
-          <TableRow className="border-b opacity-60">
-            <TableHead className="p-2">名称</TableHead>
-            <TableHead className="p-2">Binding</TableHead>
-            <TableHead className="p-2">Version</TableHead>
-            <TableHead className="p-2">操作</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {secrets.data?.map((s) => (
-            <TableRow key={s.id} className="border-b">
-              <TableCell className="p-2 font-mono">{s.name}</TableCell>
-              <TableCell className="p-2">
-                <BindingRow secret={s} appId={appId} envId={envId} />
-              </TableCell>
-              <TableCell className="p-2">
-                {s.selected_version}/{s.latest_version}
-              </TableCell>
-              <TableCell className="p-2">
-                <UpdateValueButton secret={s} appId={appId} envId={envId} />
-              </TableCell>
+      <Frame className="w-full">
+        <Table variant="card" className="w-full text-left text-sm">
+          <TableHeader>
+            <TableRow className="border-b opacity-60">
+              <TableHead className="p-2">名称</TableHead>
+              <TableHead className="p-2">Binding</TableHead>
+              <TableHead className="p-2">Version</TableHead>
+              <TableHead className="p-2">操作</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {secrets.data?.map((s) => (
+              <TableRow key={s.id} className="border-b">
+                <TableCell className="p-2 font-mono">{s.name}</TableCell>
+                <TableCell className="p-2">
+                  <BindingRow secret={s} appId={appId} envId={envId} />
+                </TableCell>
+                <TableCell className="p-2">
+                  {s.selected_version}/{s.latest_version}
+                </TableCell>
+                <TableCell className="p-2">
+                  <UpdateValueButton secret={s} appId={appId} envId={envId} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Frame>
 
       <ErrorBoundary>
         <DraftPanel appId={appId} envId={envId} />
