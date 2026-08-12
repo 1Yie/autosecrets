@@ -9,6 +9,8 @@ import { z } from "zod";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Frame, FrameFooter } from "../../components/ui/frame";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import {
   Dialog, DialogClose, DialogDescription, DialogFooter,
   DialogHeader, DialogPanel, DialogPopup, DialogTitle, DialogTrigger,
@@ -84,23 +86,47 @@ export function AppsPage() {
       {apps.items.length === 0 && !apps.isLoading && (
         <p className="opacity-60">还没有应用，点右上角「新建应用」开始。</p>
       )}
-      <ul className="space-y-2">
-        {apps.items.map((app) => (
-          <li key={app.id}>
-            <Link to={`/apps/${app.id}`} className="block rounded border p-3 hover:bg-white/5">
-              {app.name}
-            </Link>
-          </li>
-        ))}
-      </ul>
-      <div className="flex items-center gap-2 text-sm">
-        <Button variant="outline" size="sm" disabled={apps.isFirstPage} onClick={apps.prev}>
-          上一页
-        </Button>
-        <Button variant="outline" size="sm" disabled={!apps.nextCursor} onClick={apps.next}>
-          下一页
-        </Button>
-      </div>
+      {apps.items.length > 0 && (
+        <Frame className="w-full">
+          <Table variant="card">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead>名称</TableHead>
+                <TableHead>创建时间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {apps.items.map((app) => (
+                <TableRow key={app.id}>
+                  <TableCell>
+                    <Link to={`/apps/${app.id}`} className="font-medium hover:underline">
+                      {app.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground tabular-nums">
+                    {new Date(app.created_at).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <FrameFooter className="p-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-muted-foreground text-sm">
+                共 <strong className="font-medium text-foreground">{apps.items.length}</strong> 个应用
+              </p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" disabled={apps.isFirstPage} onClick={apps.prev}>
+                  上一页
+                </Button>
+                <Button variant="outline" size="sm" disabled={!apps.nextCursor} onClick={apps.next}>
+                  下一页
+                </Button>
+              </div>
+            </div>
+          </FrameFooter>
+        </Frame>
+      )}
     </div>
   );
 }

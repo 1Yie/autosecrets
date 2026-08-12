@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 
 const reasonCategories = ["maintenance", "incident_response", "access_change", "configuration_correction", "other"];
 
@@ -81,34 +82,32 @@ export function AuditPage() {
       {audit.items.length === 0 ? (
         <p className="text-sm opacity-60">暂无匹配的审计事件。</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="border-b bg-muted/40 text-left">
-              <tr>
-                <th className="px-3 py-2 font-medium">时间</th>
-                <th className="px-3 py-2 font-medium">操作者</th>
-                <th className="px-3 py-2 font-medium">动作</th>
-                <th className="px-3 py-2 font-medium">结果</th>
-                <th className="px-3 py-2 font-medium">原因</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {audit.items.map((event) => (
-                <tr key={event.id}>
-                  <td className="whitespace-nowrap px-3 py-2 opacity-60">
-                    {new Date(event.created_at).toLocaleString()}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">{event.actor_display || event.actor}</td>
-                  <td className="px-3 py-2">{event.action}</td>
-                  <td className="px-3 py-2">{event.outcome || event.result}</td>
-                  <td className="max-w-48 truncate px-3 py-2 opacity-70">
-                    {event.operation_reason_category || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table variant="card" className="w-full">
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>时间</TableHead>
+              <TableHead>操作者</TableHead>
+              <TableHead>动作</TableHead>
+              <TableHead>结果</TableHead>
+              <TableHead>原因</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {audit.items.map((event) => (
+              <TableRow key={event.id}>
+                <TableCell className="whitespace-nowrap text-muted-foreground">
+                  {new Date(event.created_at).toLocaleString()}
+                </TableCell>
+                <TableCell className="font-mono text-xs">{event.actor_display || event.actor}</TableCell>
+                <TableCell>{event.action}</TableCell>
+                <TableCell>{event.outcome || event.result}</TableCell>
+                <TableCell className="max-w-48 truncate text-muted-foreground">
+                  {event.operation_reason_category || "—"}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       <div className="flex items-center gap-2 text-sm">
         <Button variant="outline" size="sm" disabled={audit.isFirstPage} onClick={audit.prev}>

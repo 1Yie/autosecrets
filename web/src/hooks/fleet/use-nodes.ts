@@ -10,6 +10,8 @@ export interface ManagedNode {
   desired_etag: string;
   observed_revision: string;
   last_result: string;
+  state: "never_online" | "healthy" | "converging" | "failed" | "offline";
+  unassigned: boolean;
 }
 
 export function useNodes() {
