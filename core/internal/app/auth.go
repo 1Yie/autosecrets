@@ -195,10 +195,12 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	a.issueSession(w, r, member)
 }
 
-// handleResumeMFAEnrollment lets an existing active member without a
-// confirmed TOTP enrollment (e.g. an account created before mandatory MFA)
-// start a fresh enrollment with the Bootstrap-equivalent verify and
-// Recovery Code confirmation flow.
+// handleResumeMFAEnrollment lets an existing member without a confirmed TOTP
+// enrollment resume the flow with a fresh token: a pending first
+// Administrator whose interrupted Bootstrap lost its enrollment token, or an
+// active legacy account created before mandatory MFA. The password must be
+// re-proven; the flow then continues through the same verify and Recovery
+// Code confirmation steps as Bootstrap.
 func (a *App) handleResumeMFAEnrollment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Username string `json:"username"`
@@ -209,7 +211,7 @@ func (a *App) handleResumeMFAEnrollment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	member, err := a.store.MemberByUsername(r.Context(), body.Username)
-	if err != nil || member.Status != store.MemberActive {
+	if err != nil || (member.Status != store.MemberActive && member.Status != store.MemberPending) {
 		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
 		return
 	}

@@ -4,6 +4,7 @@ import { useMe } from "../hooks/auth/use-me";
 import { useLogout } from "../hooks/auth/use-logout";
 import { BootstrapPage } from "../pages/bootstrap";
 import { LoginPage } from "../pages/login";
+import { ResumeEnrollmentPage } from "../pages/resume-enrollment";
 import { ErrorBoundary } from "../components/error-boundary";
 import { Skeleton } from "../components/ui/skeleton";
 import { ThemeToggle } from "../components/theme-toggle";
@@ -34,19 +35,7 @@ export function AppLayout() {
   if (me.data?.mfa_enrollment_required) {
     return (
       <AuthLayout>
-        <div className="space-y-4">
-          <h1 className="text-xl font-bold">首次管理员注册未完成</h1>
-          <p className="text-sm opacity-70">
-            系统已存在待激活的首位管理员。请刷新页面重试；若仍无法继续，请通过 Core
-            主机本地流程处理。
-          </p>
-          <button
-            className="text-sm text-blue-600 underline"
-            onClick={() => window.location.reload()}
-          >
-            刷新
-          </button>
-        </div>
+        <ResumeEnrollmentPage />
       </AuthLayout>
     );
   }

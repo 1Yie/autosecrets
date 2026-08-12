@@ -284,3 +284,52 @@ func TestLegacyMemberMFAEnrollmentResume(t *testing.T) {
 		t.Fatalf("resume after enrollment must conflict: %d %s", again.status, again.raw)
 	}
 }
+
+// TestPendingMemberMFAEnrollmentResume covers the interrupted-Bootstrap case:
+// the first Administrator stays pending until TOTP and Recovery Code
+// confirmation complete, and the enrollment token can be re-issued by
+// proving the password (US-31).
+func TestPendingMemberMFAEnrollmentResume(t *testing.T) {
+	ta := newTestApp(t)
+	code, err := ta.app.EmitBootstrapCode(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := ta.do(t, "POST", "/api/v1/bootstrap", map[string]string{
+		"code": code, "organization_name": "Acme", "username": "admin",
+		"password": "correct-horse-42",
+	}, "", "")
+	if started.status != http.StatusCreated {
+		t.Fatalf("bootstrap: %d %s", started.status, started.raw)
+	}
+	// The browser lost the one-time enrollment token: resume by password.
+	resumed := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/resume", map[string]string{
+		"username": "admin", "password": "correct-horse-42",
+	}, "", "")
+	if resumed.status != http.StatusOK || resumed.body["enrollment_token"] == "" || resumed.body["totp_uri"] == "" {
+		t.Fatalf("resume pending enrollment: %d %s", resumed.status, resumed.raw)
+	}
+	secret := totpSecretFromURI(t, resumed.body["totp_uri"].(string))
+	totp, err := crypto.TOTPCode(secret, ta.app.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/verify", map[string]string{
+		"enrollment_token": resumed.body["enrollment_token"].(string), "totp_code": totp,
+	}, "", "")
+	if verified.status != http.StatusOK {
+		t.Fatalf("verify resumed enrollment: %d %s", verified.status, verified.raw)
+	}
+	confirmed := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/confirm", map[string]string{
+		"confirmation_token": verified.body["confirmation_token"].(string),
+	}, "", "")
+	if confirmed.status != http.StatusOK {
+		t.Fatalf("confirm resumed enrollment: %d %s", confirmed.status, confirmed.raw)
+	}
+	login := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "admin", "password": "correct-horse-42", "totp_code": totp,
+	}, "", "")
+	if login.status != http.StatusOK {
+		t.Fatalf("login after resumed enrollment: %d %s", login.status, login.raw)
+	}
+}
