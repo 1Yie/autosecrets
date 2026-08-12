@@ -141,8 +141,9 @@ func (s *Store) ListUnassignmentTasks(ctx context.Context, assignmentID string) 
 	return tasks, rows.Err()
 }
 
-// ReportCleanupTask records the Agent's cleanup acknowledgement. Only
-// pending or failed tasks may transition; cleaned is terminal.
+// ReportCleanupTask records the Agent's cleanup acknowledgement. Pending and
+// failed tasks may transition, and a reconnecting node may clear a
+// cleanup_unconfirmed task by actually completing the local cleanup.
 func (s *Store) ReportCleanupTask(ctx context.Context, assignmentID, nodeID, result, errorMsg string) error {
 	if result != "cleaned" && result != "failed" {
 		return ErrBadPayload
@@ -150,7 +151,8 @@ func (s *Store) ReportCleanupTask(ctx context.Context, assignmentID, nodeID, res
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE unassignment_tasks
 		SET status = $3, error = $4, updated_at = now()
-		WHERE assignment_id = $1 AND node_id = $2 AND status IN ('pending', 'failed')`,
+		WHERE assignment_id = $1 AND node_id = $2
+		  AND status IN ('pending', 'failed', 'cleanup_unconfirmed')`,
 		assignmentID, nodeID, result, errorMsg)
 	if err != nil {
 		return err
@@ -206,7 +208,7 @@ func (s *Store) PendingCleanupInstructions(ctx context.Context, nodeID string) (
 		SELECT t.assignment_id, a.application_id, a.environment_id
 		FROM unassignment_tasks t
 		JOIN assignments a ON a.id = t.assignment_id
-		WHERE t.node_id = $1 AND t.status IN ('pending', 'failed')
+		WHERE t.node_id = $1 AND t.status IN ('pending', 'failed', 'cleanup_unconfirmed')
 		ORDER BY t.assignment_id`, nodeID)
 	if err != nil {
 		return nil, err

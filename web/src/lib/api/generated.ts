@@ -1827,6 +1827,7 @@ export interface operations {
                     group_id: string;
                     application_id: string;
                     environment_id: string;
+                    operation_reason: components["schemas"]["OperationReason"];
                 };
             };
         };

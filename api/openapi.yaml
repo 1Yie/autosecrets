@@ -870,7 +870,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [group_id, application_id, environment_id]
+              required: [group_id, application_id, environment_id, operation_reason]
               properties:
                 group_id:
                   type: string
@@ -878,6 +878,8 @@ paths:
                   type: string
                 environment_id:
                   type: string
+                operation_reason:
+                  $ref: "#/components/schemas/OperationReason"
       responses:
         "403":
           $ref: "#/components/responses/Forbidden"

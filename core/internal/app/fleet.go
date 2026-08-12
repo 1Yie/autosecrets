@@ -100,13 +100,23 @@ func (a *App) handleListAssignments(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		GroupID       string `json:"group_id"`
-		ApplicationID string `json:"application_id"`
-		EnvironmentID string `json:"environment_id"`
+		GroupID         string                `json:"group_id"`
+		ApplicationID   string                `json:"application_id"`
+		EnvironmentID   string                `json:"environment_id"`
+		OperationReason *operationReasonInput `json:"operation_reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
 		body.GroupID == "" || body.ApplicationID == "" || body.EnvironmentID == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "group_id, application_id, and environment_id are required")
+		return
+	}
+	reason, ok := operationReason(body.OperationReason)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
+		return
+	}
+	env, err := a.store.GetEnvironment(r.Context(), body.EnvironmentID, body.ApplicationID)
+	if err == nil && env.Protection != "standard" && !a.requireStepUp(w, r) {
 		return
 	}
 	asg, err := a.store.CreateAssignment(r.Context(), uuid.NewString(), body.GroupID, body.ApplicationID, body.EnvironmentID)
@@ -131,7 +141,7 @@ func (a *App) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
 		Actor: actorFrom(r), Action: "assignment.create", Resource: asg.ID,
-		Result:        fmt.Sprintf("bundle=%s/%s group=%s", asg.ApplicationID, asg.EnvironmentID, asg.GroupName),
+		Result:        fmt.Sprintf("bundle=%s/%s group=%s reason=%s", asg.ApplicationID, asg.EnvironmentID, asg.GroupName, reason.Category),
 		CorrelationID: a.correlationID(r),
 	})
 	writeJSON(w, http.StatusCreated, asg)

@@ -17,6 +17,9 @@ import (
 // handleInstallCommand issues a ten-minute, single-use Enrollment Token and
 // renders the Install Command. The Token appears in this response only.
 func (a *App) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
+	if !a.requireStepUp(w, r) {
+		return
+	}
 	if a.cfg.PublicAgentURL == "" {
 		writeError(w, http.StatusServiceUnavailable, "unavailable",
 			"CORE_PUBLIC_AGENT_URL is not configured")

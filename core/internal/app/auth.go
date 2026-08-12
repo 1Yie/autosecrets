@@ -257,15 +257,13 @@ func (a *App) handlePasswordChange(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	if _, err := a.store.Exec(r.Context(), `UPDATE admins SET password_hash = $2 WHERE id = $1`, member.ID, newHash); err != nil {
+	if err := a.store.ChangePassword(r.Context(), member.ID, newHash, store.AuditEvent{
+		Actor: "member:" + member.Username, Action: "member.password_changed", Resource: member.ID,
+		Result: "ok", CorrelationID: a.correlationID(r),
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
 		return
 	}
-	if err := a.store.DeleteMemberSessions(r.Context(), member.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
-		return
-	}
-	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{Actor: "member:" + member.Username, Action: "member.password_changed", Resource: member.ID, Result: "ok", CorrelationID: a.correlationID(r)})
 	a.issueSession(w, r, member)
 }
 

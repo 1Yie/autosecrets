@@ -70,11 +70,13 @@ func (s *Store) OverviewAttention(ctx context.Context) ([]AttentionFact, error) 
 		Scan(&cleanupFailed, &cleanupUnconfirmed); err != nil {
 		return nil, err
 	}
-	if cleanupFailed > 0 {
-		facts = append(facts, AttentionFact{Kind: "cleanup_failed", Count: cleanupFailed})
-	}
+	// cleanup_unconfirmed is the highest-priority condition: local Secret
+	// material may still exist and the control plane stopped waiting.
 	if cleanupUnconfirmed > 0 {
 		facts = append(facts, AttentionFact{Kind: "cleanup_unconfirmed", Count: cleanupUnconfirmed})
+	}
+	if cleanupFailed > 0 {
+		facts = append(facts, AttentionFact{Kind: "cleanup_failed", Count: cleanupFailed})
 	}
 
 	rows, err := s.pool.Query(ctx, `

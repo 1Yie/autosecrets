@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { API_PATHS } from "../../lib/constants/api-paths";
 import { apiGet } from "../../lib/api";
-import type { Page } from "../use-cursor-page";
+import type { Page } from "../shared/use-cursor-page";
 
 export interface AuditEvent {
   id: number;

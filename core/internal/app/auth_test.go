@@ -146,3 +146,82 @@ func TestLoginLogoutAndCSRF(t *testing.T) {
 		t.Fatalf("session survived logout: %d", stale.status)
 	}
 }
+
+// TestPasswordChangeRevokesOtherSessions locks US-53: a password change
+// revokes every Session and reissues only the current browser's Session,
+// with the change audited atomically.
+func TestPasswordChangeRevokesOtherSessions(t *testing.T) {
+	ta := newTestApp(t)
+	code, err := ta.app.EmitBootstrapCode(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := ta.do(t, "POST", "/api/v1/bootstrap", map[string]string{
+		"code": code, "organization_name": "Acme", "username": "admin",
+		"password": "correct-horse-42",
+	}, "", "")
+	secret := totpSecretFromURI(t, started.body["totp_uri"].(string))
+	totp, err := crypto.TOTPCode(secret, ta.app.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/verify", map[string]string{
+		"enrollment_token": started.body["enrollment_token"].(string), "totp_code": totp,
+	}, "", "")
+	ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/confirm", map[string]string{
+		"confirmation_token": verified.body["confirmation_token"].(string),
+	}, "", "")
+	login := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "admin", "password": "correct-horse-42", "totp_code": totp,
+	}, "", "")
+	cookie := sessionCookieFrom(t, login)
+	csrf := login.body["csrf_token"].(string)
+	totp2, err := crypto.TOTPCode(secret, ta.app.now().Add(31*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := ta.do(t, "POST", "/api/v1/auth/password", map[string]string{
+		"current_password": "correct-horse-42",
+		"new_password":     "correct-horse-battery-42",
+		"totp_code":        totp2,
+	}, cookie, csrf)
+	if changed.status != http.StatusOK {
+		t.Fatalf("password change: %d %s", changed.status, changed.raw)
+	}
+	newCookie := sessionCookieFrom(t, changed)
+	oldMe := ta.do(t, "GET", "/api/v1/me", nil, cookie, "")
+	if oldMe.status != http.StatusUnauthorized {
+		t.Fatalf("old session must be revoked: %d %s", oldMe.status, oldMe.raw)
+	}
+	newMe := ta.do(t, "GET", "/api/v1/me", nil, newCookie, "")
+	if newMe.status != http.StatusOK {
+		t.Fatalf("current browser session must be reissued: %d %s", newMe.status, newMe.raw)
+	}
+}
+
+// TestIdleExpirySlidesOnMutation locks US-44-46: only deliberate
+// interactions extend the idle window; polling never does.
+func TestIdleExpirySlidesOnMutation(t *testing.T) {
+	current := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
+	ta := newTestApp(t, func(options *Options) { options.Now = func() time.Time { return current } })
+	cookie, csrf := ta.bootstrap(t)
+
+	// 20 minutes in, a deliberate mutation slides the idle window.
+	current = current.Add(20 * time.Minute)
+	create := ta.do(t, "POST", "/api/v1/applications", map[string]string{"name": "web"}, cookie, csrf)
+	if create.status != http.StatusCreated {
+		t.Fatalf("mutation: %d %s", create.status, create.raw)
+	}
+	// Another 20 minutes later the Session is still valid (idle slid).
+	current = current.Add(20 * time.Minute)
+	me := ta.do(t, "GET", "/api/v1/me", nil, cookie, "")
+	if me.status != http.StatusOK {
+		t.Fatalf("idle window must slide on mutation: %d %s", me.status, me.raw)
+	}
+	// Without any further interaction the idle window expires.
+	current = current.Add(31 * time.Minute)
+	expired := ta.do(t, "GET", "/api/v1/me", nil, cookie, "")
+	if expired.status != http.StatusUnauthorized {
+		t.Fatalf("idle session must expire: %d %s", expired.status, expired.raw)
+	}
+}

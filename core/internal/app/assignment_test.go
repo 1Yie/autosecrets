@@ -1,13 +1,19 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"testing"
+
+	"autosecrets.dev/core/internal/crypto"
 )
 
-func assignBody(a authoring, groupID string) map[string]string {
-	return map[string]string{
+func assignBody(a authoring, groupID string) map[string]any {
+	return map[string]any{
 		"group_id": groupID, "application_id": a.appID, "environment_id": a.envID,
+		"operation_reason": map[string]string{
+			"category": "maintenance", "explanation": "test bundle assignment",
+		},
 	}
 }
 
@@ -83,5 +89,69 @@ func TestAssignmentNodeAmbiguity(t *testing.T) {
 		map[string]string{"node_id": node.nodeID}, a.cookie, a.csrf)
 	if add2.status != http.StatusConflict {
 		t.Fatalf("ambiguous membership must conflict: %d %s", add2.status, add2.raw)
+	}
+}
+
+// TestAssignmentRequiresReasonAndProtectedStepUp locks US-232/US-148: every
+// Assignment carries an Operation Reason, and Protected Environments need a
+// current Step-up Grant.
+func TestAssignmentRequiresReasonAndProtectedStepUp(t *testing.T) {
+	ta := newTestApp(t)
+	a := ta.authoringSetup(t)
+	ta.putPolicy(t, a)
+	ta.createSecret(t, a, "db_pass", "v1")
+	ta.publish(t, a)
+	g := ta.do(t, "POST", "/api/v1/node-groups", map[string]string{"name": "g1"}, a.cookie, a.csrf)
+
+	noReason := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
+		"group_id": g.body["id"].(string), "application_id": a.appID, "environment_id": a.envID,
+	}, a.cookie, a.csrf)
+	if noReason.status != http.StatusBadRequest {
+		t.Fatalf("assignment without operation reason: %d %s", noReason.status, noReason.raw)
+	}
+	ok := ta.do(t, "POST", "/api/v1/assignments", assignBody(a, g.body["id"].(string)), a.cookie, a.csrf)
+	if ok.status != http.StatusCreated {
+		t.Fatalf("assignment with reason: %d %s", ok.status, ok.raw)
+	}
+
+	// Protected Environment: assignment requires Step-up.
+	prot := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
+		map[string]string{"name": "prod", "protection": "protected"}, a.cookie, a.csrf)
+	prod := authoring{appID: a.appID, envID: prot.body["id"].(string), cookie: a.cookie, csrf: a.csrf}
+	ta.putPolicy(t, prod)
+	ta.createSecret(t, prod, "prod_token", "p1")
+	pub := ta.do(t, "POST", publishPath(prod),
+		reason("maintenance", "publish the production token"), a.cookie, a.csrf)
+	if pub.status != http.StatusCreated {
+		t.Fatalf("protected publish: %d %s", pub.status, pub.raw)
+	}
+	if err := ta.store.RevokeStepUp(context.Background(), crypto.HashToken(a.cookie)); err != nil {
+		t.Fatal(err)
+	}
+	g2 := ta.do(t, "POST", "/api/v1/node-groups", map[string]string{"name": "g2"}, a.cookie, a.csrf)
+	denied := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
+		"group_id": g2.body["id"].(string), "application_id": a.appID,
+		"environment_id": prod.envID,
+		"operation_reason": map[string]string{
+			"category": "maintenance", "explanation": "assign the production bundle",
+		},
+	}, a.cookie, a.csrf)
+	if denied.status != http.StatusForbidden || denied.body["code"] != "step_up_required" {
+		t.Fatalf("protected assignment without step-up: %d %s", denied.status, denied.raw)
+	}
+	stepUp := ta.do(t, "POST", "/api/v1/auth/step-up",
+		map[string]string{"password": "correct-horse-42"}, a.cookie, a.csrf)
+	if stepUp.status != http.StatusOK {
+		t.Fatalf("step-up: %d %s", stepUp.status, stepUp.raw)
+	}
+	allowed := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
+		"group_id": g2.body["id"].(string), "application_id": a.appID,
+		"environment_id": prod.envID,
+		"operation_reason": map[string]string{
+			"category": "maintenance", "explanation": "assign the production bundle",
+		},
+	}, a.cookie, a.csrf)
+	if allowed.status != http.StatusCreated {
+		t.Fatalf("protected assignment with step-up: %d %s", allowed.status, allowed.raw)
 	}
 }

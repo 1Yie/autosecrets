@@ -11,7 +11,7 @@ const categoryLabels: Record<OperationReasonForm["category"], string> = {
 
 interface OperationReasonFieldsProps {
   register: UseFormRegister<OperationReasonForm>;
-  errors: FieldErrors<OperationReasonForm>;
+  errors?: FieldErrors<OperationReasonForm>;
 }
 
 /** Shared Operation Reason fields for Publish and Rollback (10-500 char
@@ -28,7 +28,7 @@ export function OperationReasonFields({ register, errors }: OperationReasonField
             </option>
           ))}
         </select>
-        {errors.category && <p className="text-sm text-red-500">{errors.category.message}</p>}
+        {errors?.category && <p className="text-sm text-red-500">{errors.category.message}</p>}
       </div>
       <div>
         <label className="text-sm">说明（10–500 字符）</label>
@@ -38,7 +38,7 @@ export function OperationReasonFields({ register, errors }: OperationReasonField
           data-testid="reason-explanation"
           {...register("explanation")}
         />
-        {errors.explanation && <p className="text-sm text-red-500">{errors.explanation.message}</p>}
+        {errors?.explanation && <p className="text-sm text-red-500">{errors.explanation.message}</p>}
       </div>
       <div>
         <label className="text-sm">外部引用（可选）</label>
@@ -48,7 +48,7 @@ export function OperationReasonFields({ register, errors }: OperationReasonField
           placeholder="例如 INC-1234"
           {...register("external_ref")}
         />
-        {errors.external_ref && <p className="text-sm text-red-500">{errors.external_ref.message}</p>}
+        {errors?.external_ref && <p className="text-sm text-red-500">{errors.external_ref.message}</p>}
       </div>
     </div>
   );

@@ -199,6 +199,9 @@ func (a *App) requireSession(next http.Handler) http.Handler {
 				writeError(w, http.StatusForbidden, "forbidden", "invalid CSRF token")
 				return
 			}
+			// Mutations are deliberate interactions: slide the idle window.
+			now := a.now()
+			_ = a.store.TouchSessionActivity(r.Context(), session.SessionIDHash, now, now.Add(sessionIdleTTL))
 		}
 		ctx := context.WithValue(r.Context(), sessionKey{}, session)
 		next.ServeHTTP(w, r.WithContext(ctx))

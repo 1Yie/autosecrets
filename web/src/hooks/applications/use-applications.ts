@@ -1,4 +1,4 @@
-import { useCursorPage } from "../use-cursor-page";
+import { useCursorPage } from "../shared/use-cursor-page";
 import { API_PATHS } from "../../lib/constants/api-paths";
 
 export interface Application { id: string; name: string; created_at: string; }

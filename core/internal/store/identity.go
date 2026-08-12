@@ -313,6 +313,28 @@ func (s *Store) DeleteMemberSessions(ctx context.Context, memberID string) error
 	return err
 }
 
+// ChangePassword updates the password hash, revokes every Session (and with
+// them their Step-up Grants via cascade), and appends the Audit Event in the
+// same transaction (implementation-plan: security-relevant changes are
+// audited atomically).
+func (s *Store) ChangePassword(ctx context.Context, memberID, passwordHash string, audit AuditEvent) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE admins SET password_hash = $2 WHERE id = $1`, memberID, passwordHash); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM sessions WHERE admin_id = $1`, memberID); err != nil {
+		return err
+	}
+	if err := s.appendAuditTx(ctx, tx, audit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *Store) GrantStepUp(ctx context.Context, sessionIDHash string, expiresAt time.Time) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO step_up_grants (session_id_hash, expires_at)
 		VALUES ($1, $2) ON CONFLICT (session_id_hash) DO UPDATE SET granted_at = now(), expires_at = EXCLUDED.expires_at`, sessionIDHash, expiresAt)

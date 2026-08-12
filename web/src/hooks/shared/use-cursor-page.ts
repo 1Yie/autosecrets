@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { apiGet } from "../lib/api";
+import { apiGet } from "../../lib/api";
 
 export interface Page<T> {
   items: T[];

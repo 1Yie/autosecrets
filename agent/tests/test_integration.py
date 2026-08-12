@@ -52,7 +52,9 @@ ca_bundle = "{core_stack['keys'] / 'agent-ca.crt'}"
     _, group, _ = api(admin, "POST", "/api/v1/node-groups", {"name": "g1"})
     status, asg, _ = api(admin, "POST", "/api/v1/assignments",
                          {"group_id": group["id"], "application_id": app["id"],
-                          "environment_id": env["id"]})
+                          "environment_id": env["id"],
+                          "operation_reason": {"category": "maintenance",
+                                               "explanation": "agent fixture assignment"}})
     assert status == 201, asg
     _, cmd, _ = api(admin, "POST", "/api/v1/nodes/install-command", {"name": "fixture-node"})
     token = cmd["command"].split("--token ")[1].split()[0]
@@ -97,6 +99,7 @@ def test_sync_is_idempotent(managed_node):
 def test_node_reports_observed_revision(managed_node):
     _, nodes, _ = http_json("GET", managed_node["admin"]["core_url"] + "/api/v1/nodes",
                             cookies=managed_node["admin"]["cookie"])
+    nodes = nodes["items"]
     assert any(n["observed_revision"] == managed_node["revision_id"] and n["last_result"] == "ok"
                for n in nodes)
 

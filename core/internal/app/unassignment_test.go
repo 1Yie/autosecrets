@@ -150,6 +150,33 @@ func TestUnassignmentStateMachine(t *testing.T) {
 	if !found {
 		t.Fatalf("cleanup_unconfirmed must be a highest-priority attention item: %s", overview.raw)
 	}
+
+	// A reconnecting node still receives the cleanup instruction and can
+	// clear the unconfirmed state by actually completing local cleanup.
+	recovered := ta.doAgent(t, "POST", "/agent/v1/nodes/"+node2.nodeID+"/cleanup", node2.serial,
+		map[string]string{"assignment_id": assignmentID, "result": "cleaned"})
+	if recovered.status != http.StatusOK {
+		t.Fatalf("cleanup_unconfirmed recovery: %d %s", recovered.status, recovered.raw)
+	}
+	state = ta.do(t, "GET", "/api/v1/assignments/"+assignmentID, nil, a.cookie, "")
+	byNode = map[string]string{}
+	for _, raw := range state.body["tasks"].([]any) {
+		task := raw.(map[string]any)
+		byNode[task["node_id"].(string)] = task["status"].(string)
+	}
+	if byNode[node2.nodeID] != "cleaned" {
+		t.Fatalf("recovery must clear cleanup_unconfirmed: %s", state.raw)
+	}
+	overview = ta.do(t, "GET", "/api/v1/overview", nil, a.cookie, "")
+	found = false
+	for _, raw := range overview.body["attention"].([]any) {
+		if raw.(map[string]any)["kind"] == "cleanup_unconfirmed" {
+			found = true
+		}
+	}
+	if found {
+		t.Fatalf("cleanup_unconfirmed attention must clear after recovery: %s", overview.raw)
+	}
 }
 
 func policyPath(a authoring) string {
