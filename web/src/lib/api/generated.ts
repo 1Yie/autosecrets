@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/mfa-enrollment/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start MFA enrollment for an existing active member without TOTP */
+        post: operations["resumeMFAEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/mfa-enrollment/confirm": {
         parameters: {
             query?: never;
@@ -880,7 +897,7 @@ export interface components {
              * @description Stable machine-readable code; switch on this
              * @enum {string}
              */
-            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "duplicate" | "internal" | "unavailable" | "step_up_required" | "payload_too_large" | "activation_policy_required";
+            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "duplicate" | "internal" | "unavailable" | "step_up_required" | "payload_too_large" | "activation_policy_required" | "mfa_enrollment_required";
         };
     };
     responses: {
@@ -1055,6 +1072,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     verifyMFAEnrollment: {
@@ -1085,6 +1103,40 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resumeMFAEnrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    username: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Fresh enrollment with a one-time TOTP URI */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        username: string;
+                        enrollment_token: string;
+                        totp_uri: string;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
         };
     };

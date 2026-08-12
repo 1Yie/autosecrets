@@ -40,6 +40,13 @@ export const handlers = [
   http.post("/api/v1/auth/mfa-enrollment/confirm", () =>
     HttpResponse.json({ id: "member-1", username: "admin", status: "active" }),
   ),
+  http.post("/api/v1/auth/mfa-enrollment/resume", () =>
+    HttpResponse.json({
+      username: "admin",
+      enrollment_token: "resumed-enrollment-token-1",
+      totp_uri: "otpauth://totp/AutoSecrets:admin?secret=JBSWY3DPEHPK3PXP",
+    }),
+  ),
   http.post("/api/v1/auth/step-up", () =>
     HttpResponse.json({ expires_at: "2026-08-12T12:05:00Z" }),
   ),

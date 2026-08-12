@@ -107,6 +107,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST "+a.managementBase+"/bootstrap", a.handleBootstrap)
 	mux.HandleFunc("POST "+a.managementBase+"/auth/mfa-enrollment/verify", a.handleVerifyMFAEnrollment)
 	mux.HandleFunc("POST "+a.managementBase+"/auth/mfa-enrollment/confirm", a.handleConfirmMFAEnrollment)
+	mux.HandleFunc("POST "+a.managementBase+"/auth/mfa-enrollment/resume", a.handleResumeMFAEnrollment)
 	mux.HandleFunc("POST "+a.managementBase+"/auth/login", a.handleLogin)
 	mux.Handle("POST "+a.managementBase+"/auth/logout", a.requireSession(http.HandlerFunc(a.handleLogout)))
 	mux.Handle("POST "+a.managementBase+"/auth/renew", a.requireSession(http.HandlerFunc(a.handleSessionRenewal)))
@@ -238,15 +239,16 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 // Error codes exposed by the management API. Extend the enum in
 // api/openapi.yaml together with this list.
 const (
-	codeBadRequest   = "bad_request"
-	codeUnauthorized = "unauthorized"
-	codeForbidden    = "forbidden"
-	codeNotFound     = "not_found"
-	codeConflict     = "conflict"
-	codeDuplicate    = "duplicate"
-	codeInternal     = "internal"
-	codeUnavailable  = "unavailable"
-	codeStepUp       = "step_up_required"
+	codeBadRequest            = "bad_request"
+	codeUnauthorized          = "unauthorized"
+	codeForbidden             = "forbidden"
+	codeNotFound              = "not_found"
+	codeConflict              = "conflict"
+	codeDuplicate             = "duplicate"
+	codeInternal              = "internal"
+	codeUnavailable           = "unavailable"
+	codeStepUp                = "step_up_required"
+	codeMFAEnrollmentRequired = "mfa_enrollment_required"
 )
 
 func actorFrom(r *http.Request) string {

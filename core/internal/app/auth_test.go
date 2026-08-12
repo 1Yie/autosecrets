@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"autosecrets.dev/core/internal/crypto"
+	"github.com/google/uuid"
 )
 
 // --- Identity -------------------------------------------------------------
@@ -223,5 +224,63 @@ func TestIdleExpirySlidesOnMutation(t *testing.T) {
 	expired := ta.do(t, "GET", "/api/v1/me", nil, cookie, "")
 	if expired.status != http.StatusUnauthorized {
 		t.Fatalf("idle session must expire: %d %s", expired.status, expired.raw)
+	}
+}
+
+// TestLegacyMemberMFAEnrollmentResume covers accounts that predate
+// mandatory MFA: login is blocked until TOTP enrollment completes, and the
+// resume flow takes them through verify + Recovery Code confirmation.
+func TestLegacyMemberMFAEnrollmentResume(t *testing.T) {
+	ta := newTestApp(t)
+	// A legacy active Administrator without any TOTP enrollment.
+	legacyID := uuid.NewString()
+	hash, err := crypto.HashPassword("correct-horse-42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ta.store.CreateAdmin(context.Background(), legacyID, "dev", hash); err != nil {
+		t.Fatal(err)
+	}
+
+	blocked := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "dev", "password": "correct-horse-42", "totp_code": "123456",
+	}, "", "")
+	if blocked.status != http.StatusForbidden || blocked.body["code"] != "mfa_enrollment_required" {
+		t.Fatalf("legacy login must require MFA enrollment: %d %s", blocked.status, blocked.raw)
+	}
+	resumed := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/resume", map[string]string{
+		"username": "dev", "password": "correct-horse-42",
+	}, "", "")
+	if resumed.status != http.StatusOK || resumed.body["enrollment_token"] == "" || resumed.body["totp_uri"] == "" {
+		t.Fatalf("resume MFA enrollment: %d %s", resumed.status, resumed.raw)
+	}
+	secret := totpSecretFromURI(t, resumed.body["totp_uri"].(string))
+	totp, err := crypto.TOTPCode(secret, ta.app.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/verify", map[string]string{
+		"enrollment_token": resumed.body["enrollment_token"].(string), "totp_code": totp,
+	}, "", "")
+	if verified.status != http.StatusOK {
+		t.Fatalf("verify resumed enrollment: %d %s", verified.status, verified.raw)
+	}
+	confirmed := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/confirm", map[string]string{
+		"confirmation_token": verified.body["confirmation_token"].(string),
+	}, "", "")
+	if confirmed.status != http.StatusOK {
+		t.Fatalf("confirm resumed enrollment: %d %s", confirmed.status, confirmed.raw)
+	}
+	login := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "dev", "password": "correct-horse-42", "totp_code": totp,
+	}, "", "")
+	if login.status != http.StatusOK {
+		t.Fatalf("login after enrollment: %d %s", login.status, login.raw)
+	}
+	again := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/resume", map[string]string{
+		"username": "dev", "password": "correct-horse-42",
+	}, "", "")
+	if again.status != http.StatusConflict {
+		t.Fatalf("resume after enrollment must conflict: %d %s", again.status, again.raw)
 	}
 }

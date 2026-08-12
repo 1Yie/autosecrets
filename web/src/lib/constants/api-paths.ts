@@ -6,6 +6,7 @@ export const API_PATHS = {
   login: "/api/v1/auth/login",
   mfaVerify: "/api/v1/auth/mfa-enrollment/verify",
   mfaConfirm: "/api/v1/auth/mfa-enrollment/confirm",
+  mfaResume: "/api/v1/auth/mfa-enrollment/resume",
   logout: "/api/v1/auth/logout",
   stepUp: "/api/v1/auth/step-up",
   renew: "/api/v1/auth/renew",

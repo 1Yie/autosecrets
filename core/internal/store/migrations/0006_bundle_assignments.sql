@@ -13,6 +13,17 @@ FROM bundle_revisions br WHERE br.id = a.revision_id;
 
 DELETE FROM assignments WHERE application_id IS NULL;
 
+-- Legacy deployments could hold several Assignments per (group, bundle)
+-- pinned to different revisions of the same Bundle. Keep only the newest
+-- row per group + bundle so the unique index can be built.
+DELETE FROM assignments a
+USING assignments newer
+WHERE newer.group_id = a.group_id
+  AND newer.application_id = a.application_id
+  AND newer.environment_id = a.environment_id
+  AND (newer.created_at > a.created_at
+       OR (newer.created_at = a.created_at AND newer.id > a.id));
+
 ALTER TABLE assignments ALTER COLUMN application_id SET NOT NULL;
 ALTER TABLE assignments ALTER COLUMN environment_id SET NOT NULL;
 ALTER TABLE assignments DROP CONSTRAINT IF EXISTS assignments_group_id_revision_id_key;

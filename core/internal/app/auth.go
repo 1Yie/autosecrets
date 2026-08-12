@@ -170,12 +170,92 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	passwordOK, err := crypto.VerifyPassword(body.Password, member.PasswordHash)
-	if err != nil || !passwordOK || !a.verifySecondFactor(r, member, body.TOTPCode, body.RecoveryCode) {
+	if err != nil || !passwordOK {
+		a.auditLoginDenied(r, body.Username)
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	enrolled, err := a.store.HasConfirmedMFA(r.Context(), member.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	if !enrolled {
+		// Legacy account that predates mandatory MFA: the password is valid,
+		// but the member must complete TOTP enrollment before a Session.
+		writeError(w, http.StatusForbidden, codeMFAEnrollmentRequired,
+			"MFA enrollment is required before login")
+		return
+	}
+	if !a.verifySecondFactor(r, member, body.TOTPCode, body.RecoveryCode) {
 		a.auditLoginDenied(r, body.Username)
 		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
 		return
 	}
 	a.issueSession(w, r, member)
+}
+
+// handleResumeMFAEnrollment lets an existing active member without a
+// confirmed TOTP enrollment (e.g. an account created before mandatory MFA)
+// start a fresh enrollment with the Bootstrap-equivalent verify and
+// Recovery Code confirmation flow.
+func (a *App) handleResumeMFAEnrollment(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, codeBadRequest, "invalid JSON")
+		return
+	}
+	member, err := a.store.MemberByUsername(r.Context(), body.Username)
+	if err != nil || member.Status != store.MemberActive {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	passwordOK, err := crypto.VerifyPassword(body.Password, member.PasswordHash)
+	if err != nil || !passwordOK {
+		writeError(w, http.StatusUnauthorized, codeUnauthorized, "invalid credentials")
+		return
+	}
+	enrolled, err := a.store.HasConfirmedMFA(r.Context(), member.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	if enrolled {
+		writeError(w, http.StatusConflict, codeConflict, "MFA is already enrolled")
+		return
+	}
+	totpSecret, err := crypto.NewTOTPSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	wrappedKey, nonces, ciphertext, err := a.mk.Seal([]byte(totpSecret))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	enrollmentToken, err := crypto.NewSecret(192)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "internal error")
+		return
+	}
+	if err := a.store.CreateEnrollmentForMember(r.Context(), member.ID,
+		crypto.HashToken(enrollmentToken), wrappedKey, nonces, ciphertext,
+		a.now().Add(mfaEnrollmentTTL)); err != nil {
+		writeError(w, http.StatusConflict, codeConflict, "MFA is already enrolled")
+		return
+	}
+	_ = a.store.AppendAudit(r.Context(), nil, store.AuditEvent{
+		Actor: "member:" + member.Username, Action: "member.mfa_resumed", Resource: member.ID,
+		Result: "pending_mfa", CorrelationID: a.correlationID(r),
+	})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"username": member.Username, "enrollment_token": enrollmentToken,
+		"totp_uri": crypto.TOTPURI("AutoSecrets", member.Username, totpSecret),
+	})
 }
 
 func (a *App) handleSessionRenewal(w http.ResponseWriter, r *http.Request) {

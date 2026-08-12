@@ -124,6 +124,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
   /api/v1/auth/mfa-enrollment/verify:
     post:
       operationId: verifyMFAEnrollment
@@ -155,6 +157,45 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/mfa-enrollment/resume:
+    post:
+      operationId: resumeMFAEnrollment
+      tags: [Identity]
+      summary: Start MFA enrollment for an existing active member without TOTP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        "200":
+          description: Fresh enrollment with a one-time TOTP URI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [username, enrollment_token, totp_uri]
+                properties:
+                  username:
+                    type: string
+                  enrollment_token:
+                    type: string
+                  totp_uri:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "409":
           $ref: "#/components/responses/Conflict"
   /api/v1/auth/mfa-enrollment/confirm:
@@ -1842,3 +1883,4 @@ components:
             - step_up_required
             - payload_too_large
             - activation_policy_required
+            - mfa_enrollment_required

@@ -2,16 +2,22 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useLogin } from "../../hooks/auth/use-login";
+import { useResumeMFAEnrollment } from "../../hooks/auth/use-resume-mfa";
 import { loginSchema, type LoginForm } from "../../lib/constants/schemas";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "../../components/ui/input-otp";
+import { MFAEnrollmentSteps, type EnrollmentContext } from "../../components/mfa-enrollment-steps";
+import { ApiError } from "../../lib/api";
 
 type SecondFactor = "totp" | "recovery";
 
 export function LoginPage() {
   const login = useLogin();
+  const resume = useResumeMFAEnrollment();
   const [secondFactor, setSecondFactor] = useState<SecondFactor>("totp");
+  const [enrollment, setEnrollment] = useState<EnrollmentContext | null>(null);
+  const needsEnrollment = login.isError && login.error instanceof ApiError && login.error.code === "mfa_enrollment_required";
   const {
     register,
     handleSubmit,
@@ -28,9 +34,46 @@ export function LoginPage() {
     });
   };
 
+  if (enrollment) {
+    return (
+      <MFAEnrollmentSteps
+        enrollment={enrollment}
+        onDone={() => {
+          setEnrollment(null);
+          login.reset();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">登录</h1>
+      {needsEnrollment && (
+        <div className="space-y-2 rounded border border-amber-300/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/20">
+          <p className="font-medium">此账号需要先完成 MFA 注册</p>
+          <p className="opacity-70">验证密码后，请绑定身份验证器并保存一次性恢复码。</p>
+          <Button
+            variant="default"
+            size="sm"
+            disabled={resume.isPending}
+            onClick={() => {
+              const username = watch("username");
+              const password = watch("password");
+              resume.mutate(
+                { username, password },
+                { onSuccess: setEnrollment },
+              );
+            }}
+            data-testid="resume-mfa"
+          >
+            开始注册
+          </Button>
+          {resume.isError && (
+            <p className="text-sm text-red-500">{String((resume.error as Error).message)}</p>
+          )}
+        </div>
+      )}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         <Input className="w-full" placeholder="用户名" data-testid="username" {...register("username")} />
         {errors.username && <p className="text-sm text-red-500">{errors.username.message}</p>}

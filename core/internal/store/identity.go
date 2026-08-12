@@ -241,6 +241,48 @@ func (s *Store) ResumeMFAEnrollment(ctx context.Context, memberID, oldTokenHash,
 	return nil
 }
 
+// CreateEnrollmentForMember starts a fresh MFA enrollment for an existing
+// active member (legacy accounts that predate mandatory TOTP). Any previous
+// unverified enrollment is replaced; a confirmed enrollment is never
+// overwritten.
+func (s *Store) CreateEnrollmentForMember(ctx context.Context, memberID, tokenHash string,
+	wrappedKey, nonces, ciphertext []byte, expiresAt time.Time) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var confirmed bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM mfa_enrollments
+			WHERE admin_id = $1 AND confirmed_at IS NOT NULL)`, memberID).Scan(&confirmed); err != nil {
+		return err
+	}
+	if confirmed {
+		return ErrConflict
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM mfa_enrollments WHERE admin_id = $1`, memberID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO mfa_enrollments (token_hash, admin_id, wrapped_key, nonces, ciphertext, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		tokenHash, memberID, wrappedKey, nonces, ciphertext, expiresAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// HasConfirmedMFA reports whether the member completed TOTP enrollment.
+func (s *Store) HasConfirmedMFA(ctx context.Context, memberID string) (bool, error) {
+	var has bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM mfa_enrollments
+			WHERE admin_id = $1 AND verified_at IS NOT NULL AND confirmed_at IS NOT NULL)`,
+		memberID).Scan(&has)
+	return has, err
+}
+
 // ConsumeRecoveryCode atomically burns one code. Callers must normalize and
 // hash it before invoking this method.
 func (s *Store) ConsumeRecoveryCode(ctx context.Context, memberID, codeHash string, now time.Time) (bool, error) {
