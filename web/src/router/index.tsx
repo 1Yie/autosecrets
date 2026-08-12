@@ -8,6 +8,8 @@ import { Spinner } from "../components/ui/spinner";
 const AppsPage = lazy(() => import("../pages/apps"));
 const AppPage = lazy(() => import("../pages/app"));
 const NodesPage = lazy(() => import("../pages/nodes"));
+const OverviewPage = lazy(() => import("../pages/overview"));
+const AuditPage = lazy(() => import("../pages/audit"));
 
 function lazyPage(element: React.ReactNode) {
   return (
@@ -31,11 +33,13 @@ export const router = createBrowserRouter([
     element: <AppLayout />,
     errorElement: <ErrorBoundary />,
     children: [
-      { index: true, element: <Navigate to="/apps" replace /> },
+      { index: true, element: <Navigate to="/overview" replace /> },
+      { path: "overview", element: lazyPage(<OverviewPage />) },
       { path: "apps", element: lazyPage(<AppsPage />) },
       { path: "apps/:appId", element: lazyPage(<AppPage />) },
       { path: "nodes", element: lazyPage(<NodesPage />) },
-      { path: "*", element: <Navigate to="/apps" replace /> },
+      { path: "audit", element: lazyPage(<AuditPage />) },
+      { path: "*", element: <Navigate to="/overview" replace /> },
     ],
   },
 ]);

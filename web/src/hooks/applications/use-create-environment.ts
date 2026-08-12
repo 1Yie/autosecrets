@@ -14,7 +14,8 @@ export interface RevisionRef { revision_id: string; label: string; }
 export function useCreateEnvironment(appId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => apiPost(API_PATHS.environments(appId), { name }),
+    mutationFn: (input: { name: string; protection: "standard" | "protected" }) =>
+      apiPost(API_PATHS.environments(appId), input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["application", appId] }),
   });
 }

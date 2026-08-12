@@ -8,10 +8,14 @@ export const usernameSchema = z
   .max(64, "最多 64 个字符")
   .regex(/^[a-zA-Z0-9._-]+$/, "仅允许字母、数字、._-");
 
-export const passwordSchema = z.string().min(10, "密码至少 10 个字符");
+export const passwordSchema = z
+  .string()
+  .min(12, "密码至少 12 个字符")
+  .max(128, "密码最多 128 个字符");
 
 export const bootstrapSchema = z.object({
   code: z.string().min(1, "请输入初始化码"),
+  organization_name: z.string().min(1, "请输入组织名称").max(128, "组织名称最多 128 个字符"),
   username: usernameSchema,
   password: passwordSchema,
 });
@@ -19,6 +23,16 @@ export const bootstrapSchema = z.object({
 export const loginSchema = z.object({
   username: z.string().min(1, "请输入用户名"),
   password: z.string().min(1, "请输入密码"),
+  totp_code: z.string().regex(/^\d{6}$/, "请输入 6 位动态验证码").optional().or(z.literal("")),
+  recovery_code: z.string().optional().or(z.literal("")),
+});
+
+export const mfaVerifySchema = z.object({
+  totp_code: z.string().regex(/^\d{6}$/, "请输入 6 位动态验证码"),
+});
+
+export const stepUpSchema = z.object({
+  password: z.string().min(1, "请输入当前密码"),
 });
 
 export const nameSchema = z
@@ -54,5 +68,7 @@ export const nodeNameSchema = nameSchema;
 
 export type BootstrapForm = z.infer<typeof bootstrapSchema>;
 export type LoginForm = z.infer<typeof loginSchema>;
+export type MFAVerifyForm = z.infer<typeof mfaVerifySchema>;
+export type StepUpForm = z.infer<typeof stepUpSchema>;
 export type SecretForm = z.infer<typeof secretSchema>;
 export type BindingForm = z.infer<typeof bindingSchema>;

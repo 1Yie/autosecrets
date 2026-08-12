@@ -12,15 +12,19 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 
-const envSchema = z.object({ name: nameSchema });
+const envSchema = z.object({
+  name: nameSchema,
+  protection: z.enum(["standard", "protected"]),
+});
 
 export function AppPage() {
   const { appId } = useParams<{ appId: string }>();
   const app = useApplication(appId ?? "");
   const createEnv = useCreateEnvironment(appId ?? "");
   const [activeEnv, setActiveEnv] = useState<string | null>(null);
-  const { register, handleSubmit, reset } = useForm<{ name: string }>({
+  const { register, handleSubmit, reset } = useForm<{ name: string; protection: "standard" | "protected" }>({
     resolver: zodResolver(envSchema),
+    defaultValues: { protection: "standard" },
   });
 
   if (app.isLoading) {
@@ -51,11 +55,15 @@ export function AppPage() {
         <form
           className="flex gap-1"
           onSubmit={handleSubmit((v) => {
-            createEnv.mutate(v.name);
+            createEnv.mutate({ name: v.name, protection: v.protection });
             reset();
           })}
         >
           <Input className="" placeholder="新环境" {...register("name")} />
+          <select className="rounded border px-2 text-sm" data-testid="env-protection" {...register("protection")}>
+            <option value="standard">standard</option>
+            <option value="protected">protected</option>
+          </select>
           <Button variant="outline"  type="submit">+</Button>
         </form>
       </div>
