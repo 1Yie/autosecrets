@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- route table file */
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
-import { AppLayout } from "../app-layout";
+import { AppLayout } from "../pages/layout";
 import { ErrorBoundary } from "../components/error-boundary";
 
 const AppsPage = lazy(() => import("../pages/apps"));
