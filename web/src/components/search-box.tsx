@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { useSearch, type SearchResult } from "../hooks/fleet/use-search";
-import { Input } from "./ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 
 const typeLabels: Record<SearchResult["type"], string> = {
   application: "应用",
@@ -12,25 +12,35 @@ const typeLabels: Record<SearchResult["type"], string> = {
 };
 
 const typeTargets: Record<SearchResult["type"], (result: SearchResult) => string> = {
-  application: (result) => `/apps/${result.id}`,
-  environment: () => "/apps",
-  node: () => "/nodes",
-  node_group: () => "/nodes",
+  application: (result) => `/dashboard/apps/${result.id}`,
+  environment: () => "/dashboard/apps",
+  node: () => "/dashboard/nodes",
+  node_group: () => "/dashboard/nodes",
 };
 
 /** Global search: Applications, Environments, Managed Nodes, Node Groups. */
 export function SearchBox() {
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const search = useSearch(query);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const search = useSearch(debouncedQuery);
   const results = search.data?.results ?? [];
+  const pending = query.trim() !== debouncedQuery.trim() || search.isLoading;
 
   return (
     <div className="relative">
-      <div className="relative">
-        <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 opacity-50" />
-        <Input
-          className="w-56 pl-7"
+      <InputGroup className="w-56">
+        <InputGroupAddon>
+          <Search className="size-4" aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
+          type="search"
           placeholder="搜索…"
           value={query}
           data-testid="global-search"
@@ -41,11 +51,11 @@ export function SearchBox() {
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           onFocus={() => setOpen(true)}
         />
-      </div>
+      </InputGroup>
       {open && query.trim().length >= 2 && (
         <div className="absolute right-0 top-full z-20 mt-1 w-72 rounded-lg border bg-background p-2 shadow-lg" data-testid="search-results">
-          {search.isLoading && <p className="px-2 py-1 text-sm opacity-60">搜索中…</p>}
-          {!search.isLoading && results.length === 0 && (
+          {pending && <p className="px-2 py-1 text-sm opacity-60">搜索中…</p>}
+          {!pending && results.length === 0 && (
             <p className="px-2 py-1 text-sm opacity-60">无结果</p>
           )}
           {results.map((result) => (

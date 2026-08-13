@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Controller, useForm } from "react-hook-form";
+import { Plus } from "lucide-react";
 import { useApplication } from "../../hooks/applications/use-application";
 import { useCreateEnvironment } from "../../hooks/applications/use-create-environment";
 import { SecretEditor } from "./secret-editor";
@@ -12,6 +13,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Tabs, TabsList, TabsTab } from "../../components/ui/tabs";
 import {
   Dialog, DialogClose, DialogDescription, DialogFooter,
   DialogHeader, DialogPanel, DialogPopup, DialogTitle, DialogTrigger,
@@ -45,21 +47,36 @@ export function AppPage() {
 
   return (
     <div className="space-y-4">
-      <Link to="/apps" className="text-sm opacity-70">← 应用</Link>
-      <h1 className="text-xl font-bold">{app.data?.name}</h1>
+      <div className="space-y-1">
+        <Link
+          to="/dashboard/apps"
+          className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          ← 应用
+        </Link>
+        <h1 className="text-xl font-bold">{app.data?.name}</h1>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
-        {app.data?.environments.map((env) => (
-          <Button
-            key={env.id}
-            className={`rounded px-3 py-1 ${activeEnv === env.id ? "bg-amber-500" : "border"}`}
-            onClick={() => setActiveEnv(env.id)}
-            data-testid={`env-${env.name}`}
+        {app.data && app.data.environments.length > 0 && (
+          <Tabs
+            value={activeEnv}
+            onValueChange={(value) => setActiveEnv(value ?? null)}
+            className="min-w-0"
           >
-            {env.name}
-          </Button>
-        ))}
+            <TabsList className="flex-wrap">
+              {app.data.environments.map((env) => (
+                <TabsTab key={env.id} value={env.id} data-testid={`env-${env.name}`}>
+                  {env.name}
+                </TabsTab>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
         <Dialog open={envDialogOpen} onOpenChange={setEnvDialogOpen}>
-          <DialogTrigger render={<Button variant="outline" />}>新建环境</DialogTrigger>
+          <DialogTrigger render={<Button variant="outline" className="shrink-0" />}>
+            <Plus className="size-4" />
+            新建环境
+          </DialogTrigger>
           <DialogPopup>
             <DialogHeader>
               <DialogTitle>新建环境</DialogTitle>

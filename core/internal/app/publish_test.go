@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"testing"
 
-	"autosecrets.dev/core/internal/crypto"
 	"github.com/google/uuid"
 )
 
@@ -21,11 +20,11 @@ func reason(category, explanation string) map[string]any {
 	}
 }
 
-// TestPublishOptionalReasonAndProtectedStepUp locks the risk policy after
+// TestPublishOptionalReason locks the risk policy after
 // the 2026-08 product decision: Operation Reason is optional (omitted ->
 // 'other', malformed -> rejected); Protected and Unclassified Environments
-// still need a current Step-up Grant.
-func TestPublishOptionalReasonAndProtectedStepUp(t *testing.T) {
+// preserve the later product decision that removed publish-specific Step-up.
+func TestPublishOptionalReason(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
 	ta.createSecret(t, a, "db_pass", "v1")
@@ -55,8 +54,8 @@ func TestPublishOptionalReasonAndProtectedStepUp(t *testing.T) {
 		t.Fatalf("unchanged draft publish must conflict: %d %s", unchanged.status, unchanged.raw)
 	}
 
-	// Protected Environment: a fresh login grants Step-up, so revoke the
-	// grant first to prove the denial, then re-grant via /auth/step-up.
+	// Protected and Unclassified Environments publish without any extra
+	// password confirmation (Step-up removed by product decision 2026-08).
 	protected := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
 		map[string]string{"name": "prod", "protection": "protected"}, a.cookie, a.csrf)
 	if protected.status != http.StatusCreated {
@@ -66,49 +65,23 @@ func TestPublishOptionalReasonAndProtectedStepUp(t *testing.T) {
 	prodAuthoring := authoring{appID: a.appID, envID: protectedEnv, cookie: a.cookie, csrf: a.csrf}
 	ta.createSecret(t, prodAuthoring, "prod_token", "p1")
 
-	if err := ta.store.RevokeStepUp(context.Background(), crypto.HashToken(a.cookie)); err != nil {
-		t.Fatal(err)
-	}
-	denied := ta.do(t, "POST", publishPath(prodAuthoring),
-		reason("maintenance", "rotate the production token"), a.cookie, a.csrf)
-	if denied.status != http.StatusForbidden || denied.body["code"] != "step_up_required" {
-		t.Fatalf("protected publish without step-up: %d %s", denied.status, denied.raw)
-	}
-	stepUp := ta.do(t, "POST", "/api/v1/auth/step-up",
-		map[string]string{"password": "correct-horse-42"}, a.cookie, a.csrf)
-	if stepUp.status != http.StatusOK {
-		t.Fatalf("step-up: %d %s", stepUp.status, stepUp.raw)
-	}
 	allowed := ta.do(t, "POST", publishPath(prodAuthoring),
 		reason("maintenance", "rotate the production token"), a.cookie, a.csrf)
 	if allowed.status != http.StatusCreated {
-		t.Fatalf("protected publish with step-up: %d %s", allowed.status, allowed.raw)
+		t.Fatalf("protected publish: %d %s", allowed.status, allowed.raw)
 	}
 
-	// Unclassified Environments (legacy migration rows) follow Protected rules.
+	// Unclassified Environments (legacy migration rows) also publish freely.
 	legacyEnv := uuid.NewString()
 	if err := ta.store.CreateEnvironment(context.Background(), legacyEnv, a.appID, "legacy", "unclassified"); err != nil {
 		t.Fatal(err)
 	}
 	legacyAuthoring := authoring{appID: a.appID, envID: legacyEnv, cookie: a.cookie, csrf: a.csrf}
 	ta.createSecret(t, legacyAuthoring, "legacy_token", "l1")
-	if err := ta.store.RevokeStepUp(context.Background(), crypto.HashToken(a.cookie)); err != nil {
-		t.Fatal(err)
-	}
-	deniedLegacy := ta.do(t, "POST", publishPath(legacyAuthoring),
-		reason("configuration_correction", "classify the legacy environment"), a.cookie, a.csrf)
-	if deniedLegacy.status != http.StatusForbidden || deniedLegacy.body["code"] != "step_up_required" {
-		t.Fatalf("unclassified publish without step-up: %d %s", deniedLegacy.status, deniedLegacy.raw)
-	}
-	stepUpAgain := ta.do(t, "POST", "/api/v1/auth/step-up",
-		map[string]string{"password": "correct-horse-42"}, a.cookie, a.csrf)
-	if stepUpAgain.status != http.StatusOK {
-		t.Fatalf("step-up: %d %s", stepUpAgain.status, stepUpAgain.raw)
-	}
 	allowedLegacy := ta.do(t, "POST", publishPath(legacyAuthoring),
 		reason("configuration_correction", "classify the legacy environment"), a.cookie, a.csrf)
 	if allowedLegacy.status != http.StatusCreated {
-		t.Fatalf("unclassified publish with step-up: %d %s", allowedLegacy.status, allowedLegacy.raw)
+		t.Fatalf("unclassified publish: %d %s", allowedLegacy.status, allowedLegacy.raw)
 	}
 }
 

@@ -5,12 +5,20 @@ set -euo pipefail
 export no_proxy="127.0.0.1,localhost" NO_PROXY="127.0.0.1,localhost"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$(mktemp -d)"
-trap 'fuser -k 5199/tcp 2>/dev/null || true; rm -rf "$WORK"' EXIT
+CORE_PID="" VITE_PID="" DEVPROXY_PID="" OIDC_PID=""
+cleanup() {
+  for pid in "$VITE_PID" "$DEVPROXY_PID" "$CORE_PID" "$OIDC_PID"; do
+    [ -z "$pid" ] || kill "$pid" 2>/dev/null || true
+  done
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 # Free the ports used by the stack (stale processes from interrupted runs).
 fuser -k 5199/tcp 2>/dev/null || true
 fuser -k 18080/tcp 2>/dev/null || true
 fuser -k 18443/tcp 2>/dev/null || true
+fuser -k 19090/tcp 2>/dev/null || true
 sleep 1
 
 export PATH="/home/ichiyo/sdk/go1.26.5/bin:$PATH:${PATH:-}"
@@ -23,13 +31,27 @@ docker exec autosecrets-test-pg psql -U autosecrets -d postgres -c "CREATE DATAB
 mkdir -p "$WORK/keys" "$WORK/artifacts"
 (cd "$ROOT/core" && go build -o autosecrets-core ./cmd/autosecrets-core)
 
+node "$ROOT/web/e2e/oidc-provider.mjs" > "$WORK/oidc.log" 2>&1 &
+OIDC_PID=$!
+for i in $(seq 1 30); do
+  wget -q -O /dev/null http://127.0.0.1:19090/.well-known/openid-configuration 2>/dev/null && break
+  sleep 0.2
+done
+wget -q -O /dev/null http://127.0.0.1:19090/.well-known/openid-configuration 2>/dev/null || {
+  echo "OIDC provider failed to start" >&2; cat "$WORK/oidc.log" >&2; exit 1; }
+
 CORE_LISTEN_ADDR=127.0.0.1:18080 \
 CORE_KEYS_DIR="$WORK/keys" \
 CORE_DB_DSN="postgres://autosecrets:test@localhost:$PG_PORT/autosecrets_e2e" \
 CORE_TRUSTED_PROXY_CIDRS=127.0.0.0/8 \
 CORE_PUBLIC_AGENT_URL="https://localhost:18443" \
 CORE_ARTIFACT_DIR="$WORK/artifacts" \
+CORE_PUBLIC_URL="http://127.0.0.1:5199" \
+CORE_OIDC_ISSUER_URL="http://127.0.0.1:19090" \
+CORE_OIDC_CLIENT_ID="autosecrets-e2e" \
+CORE_OIDC_SCOPES="openid profile" \
 "$ROOT/core/autosecrets-core" > "$WORK/core.log" 2>&1 &
+CORE_PID=$!
 
 for i in $(seq 1 30); do
   wget -q -O /dev/null http://127.0.0.1:18080/api/v1/health 2>/dev/null && break

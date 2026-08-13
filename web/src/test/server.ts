@@ -10,7 +10,8 @@ export const handlers = [
       csrf_token: "csrf-test-token",
       session_expires_at: "2026-08-12T12:00:00Z",
       idle_expires_at: "2026-08-12T12:30:00Z",
-      step_up: true,
+      totp_login_required: false,
+      auth_method: "local",
     }),
   ),
   http.post("/api/v1/auth/login", () =>
@@ -26,10 +27,14 @@ export const handlers = [
     HttpResponse.json({
       id: "member-1",
       username: "admin",
-      status: "pending_mfa",
-      enrollment_token: "enrollment-token-1",
-      totp_uri: "otpauth://totp/AutoSecrets:admin?secret=JBSWY3DPEHPK3PXP",
+      status: "active",
+      csrf_token: "csrf-test-token",
+      role: "administrator",
+      expires_at: "2026-08-12T12:00:00Z",
     }),
+  ),
+  http.get("/api/v1/auth/oidc/status", () =>
+    HttpResponse.json({ available: false, bound: false, login_available: false }),
   ),
   http.post("/api/v1/auth/mfa-enrollment/verify", () =>
     HttpResponse.json({
@@ -39,16 +44,6 @@ export const handlers = [
   ),
   http.post("/api/v1/auth/mfa-enrollment/confirm", () =>
     HttpResponse.json({ id: "member-1", username: "admin", status: "active" }),
-  ),
-  http.post("/api/v1/auth/mfa-enrollment/resume", () =>
-    HttpResponse.json({
-      username: "admin",
-      enrollment_token: "resumed-enrollment-token-1",
-      totp_uri: "otpauth://totp/AutoSecrets:admin?secret=JBSWY3DPEHPK3PXP",
-    }),
-  ),
-  http.post("/api/v1/auth/step-up", () =>
-    HttpResponse.json({ expires_at: "2026-08-12T12:05:00Z" }),
   ),
   http.post("/api/v1/nodes/install-command", () =>
     HttpResponse.json({

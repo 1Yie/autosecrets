@@ -5,13 +5,13 @@ import { useSessionStore } from "../../stores/session-store";
 
 export interface Me {
   bootstrap_required: boolean;
-  mfa_enrollment_required?: boolean;
   organization?: { display_name: string };
-  member?: { id: string; username: string; role: "administrator" | "viewer" };
+  member?: { id: string; username: string; role: "administrator" };
   csrf_token?: string;
   session_expires_at?: string;
   idle_expires_at?: string;
-  step_up?: boolean;
+  totp_login_required?: boolean;
+  auth_method?: "local" | "oidc";
 }
 
 export function useMe() {

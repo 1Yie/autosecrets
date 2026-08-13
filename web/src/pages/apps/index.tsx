@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { ChevronRight } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useApplications } from "../../hooks/applications/use-applications";
@@ -97,10 +98,14 @@ export function AppsPage() {
             </TableHeader>
             <TableBody>
               {apps.items.map((app) => (
-                <TableRow key={app.id}>
+                <TableRow key={app.id} className="hover:bg-muted/50">
                   <TableCell>
-                    <Link to={`/apps/${app.id}`} className="font-medium hover:underline">
+                    <Link
+                      to={`/dashboard/apps/${app.id}`}
+                      className="flex items-center gap-1.5 font-medium text-primary hover:underline"
+                    >
                       {app.name}
+                      <ChevronRight className="size-4 opacity-50" />
                     </Link>
                   </TableCell>
                   <TableCell className="text-muted-foreground tabular-nums">

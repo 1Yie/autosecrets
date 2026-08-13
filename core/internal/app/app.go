@@ -1,34 +1,33 @@
-// Package app wires Core's store and key material into the two HTTP surfaces:
-// the session-authenticated management API and the mTLS-authenticated Agent
-// API. All product behavior is tested through these HTTP seams.
+// Package app is the Core composition root: it wires the store and key
+// material into the identity, secrets, and fleet domain handlers and the two
+// HTTP surfaces (ADR-0001, ADR-0025). All product behavior is tested through
+// these HTTP seams.
 package app
 
 import (
 	"context"
-	"crypto/subtle"
-	"encoding/json"
-	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"time"
 
 	"autosecrets.dev/core/internal/crypto"
-	"autosecrets.dev/core/internal/server"
-	"autosecrets.dev/core/internal/store"
+	"autosecrets.dev/core/internal/database"
+	"autosecrets.dev/core/internal/fleet"
+	"autosecrets.dev/core/internal/identity"
+	"autosecrets.dev/core/internal/middleware"
+	"autosecrets.dev/core/internal/secrets"
 )
 
 const (
-	sessionCookie = "autosecrets_session"
-	csrfHeader    = "X-CSRF-Token"
-	defaultTTL    = 30 * 24 * time.Hour
+	sessionCookie = middleware.SessionCookie
+	csrfHeader    = middleware.CSRFHeader
 	bootstrapTTL  = 1 * time.Hour
-	tokenTTL      = 10 * time.Minute
-	certTTL       = 30 * 24 * time.Hour
 )
 
 type Options struct {
 	Version        string
+	PublicURL      string
 	PublicAgentURL string
 	ArtifactDir    string
 	TrustedProxy   []*net.IPNet
@@ -43,22 +42,27 @@ type Options struct {
 	InstallCurlOpts string
 	Logger          *log.Logger
 	Now             func() time.Time
+	OIDCClient      *identity.OIDCClient
+	OIDCUnavailable string
 }
 
 // App is the Core service: store, key material, and both HTTP surfaces.
 type App struct {
-	store          *store.Store
-	mk             *crypto.MasterKey
-	ca             *crypto.CA
-	signer         *crypto.Signer
-	cfg            Options
-	managementBase string
-	agentBase      string
-	logger         *log.Logger
-	now            func() time.Time
+	store           *database.Store
+	mk              *crypto.MasterKey
+	ca              *crypto.CA
+	signer          *crypto.Signer
+	cfg             Options
+	managementBase  string
+	agentBase       string
+	logger          *log.Logger
+	now             func() time.Time
+	identityHandler *identity.Handler
+	secretsHandler  *secrets.Handler
+	fleetHandler    *fleet.Handler
 }
 
-func New(st *store.Store, mk *crypto.MasterKey, ca *crypto.CA, signer *crypto.Signer,
+func New(st *database.Store, mk *crypto.MasterKey, ca *crypto.CA, signer *crypto.Signer,
 	managementBase, agentBase string, opts Options) *App {
 	if opts.Logger == nil {
 		opts.Logger = log.Default()
@@ -69,18 +73,38 @@ func New(st *store.Store, mk *crypto.MasterKey, ca *crypto.CA, signer *crypto.Si
 	if opts.OfflineAfter <= 0 {
 		opts.OfflineAfter = 75 * time.Second
 	}
-	return &App{
+	a := &App{
 		store: st, mk: mk, ca: ca, signer: signer, cfg: opts,
 		managementBase: managementBase, agentBase: agentBase,
 		logger: opts.Logger, now: opts.Now,
 	}
+	identitySvc := identity.NewService(st, identityAudit{st: st}, mk, opts.Now)
+	a.identityHandler = identity.NewHandler(identitySvc, opts.PublicURL, opts.TrustedProxy)
+	a.identityHandler.ConfigureOIDC(opts.OIDCClient, opts.OIDCUnavailable)
+	a.secretsHandler = secrets.NewHandler(st, mk, opts.Now)
+	a.fleetHandler = fleet.NewHandler(st, mk, ca, signer, opts.Now, fleet.Config{
+		PublicAgentURL:  opts.PublicAgentURL,
+		ArtifactDir:     opts.ArtifactDir,
+		InstallCurlOpts: opts.InstallCurlOpts,
+		OfflineAfter:    opts.OfflineAfter,
+	}, agentBase)
+	return a
+}
+
+// identityAudit adapts *database.Store to the identity domain's narrow
+// AuditRecorder seam (ADR-0025): domains collaborate through narrow
+// interfaces, not by importing another domain's concrete package.
+type identityAudit struct{ st *database.Store }
+
+func (a identityAudit) AppendAudit(ctx context.Context, event database.AuditEvent) error {
+	return a.st.AppendAudit(ctx, nil, event)
 }
 
 // EmitBootstrapCode generates and logs a one-time Bootstrap Code when no
 // Administrator exists yet, returning it for the operator (and tests). Only
 // the hash is stored.
 func (a *App) EmitBootstrapCode(ctx context.Context) (string, error) {
-	count, err := a.store.AdminCount(ctx)
+	count, err := a.store.HumanIdentityCount(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -101,65 +125,23 @@ func (a *App) EmitBootstrapCode(ctx context.Context) (string, error) {
 // Handler builds the full Core HTTP handler.
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
-
 	// Management surface: session-authenticated.
 	mux.HandleFunc("GET "+a.managementBase+"/health", a.handleHealth)
-	mux.HandleFunc("POST "+a.managementBase+"/bootstrap", a.handleBootstrap)
-	mux.HandleFunc("POST "+a.managementBase+"/auth/mfa-enrollment/verify", a.handleVerifyMFAEnrollment)
-	mux.HandleFunc("POST "+a.managementBase+"/auth/mfa-enrollment/confirm", a.handleConfirmMFAEnrollment)
-	mux.HandleFunc("POST "+a.managementBase+"/auth/mfa-enrollment/resume", a.handleResumeMFAEnrollment)
-	mux.HandleFunc("POST "+a.managementBase+"/auth/login", a.handleLogin)
-	mux.Handle("POST "+a.managementBase+"/auth/logout", a.requireSession(http.HandlerFunc(a.handleLogout)))
-	mux.Handle("POST "+a.managementBase+"/auth/renew", a.requireSession(http.HandlerFunc(a.handleSessionRenewal)))
-	mux.Handle("POST "+a.managementBase+"/auth/step-up", a.requireSession(http.HandlerFunc(a.handleStepUp)))
-	mux.Handle("POST "+a.managementBase+"/auth/password", a.requireSession(http.HandlerFunc(a.handlePasswordChange)))
-	mux.HandleFunc("GET "+a.managementBase+"/me", a.handleMe)
-	mux.Handle("GET "+a.managementBase+"/applications", a.requireSession(http.HandlerFunc(a.handleListApplications)))
-	mux.Handle("POST "+a.managementBase+"/applications", a.requireSession(http.HandlerFunc(a.handleCreateApplication)))
-	mux.Handle("GET "+a.managementBase+"/applications/{appID}", a.requireSession(http.HandlerFunc(a.handleGetApplication)))
-	mux.Handle("POST "+a.managementBase+"/applications/{appID}/environments", a.requireSession(http.HandlerFunc(a.handleCreateEnvironment)))
-	mux.Handle("GET "+a.managementBase+"/applications/{appID}/environments/{envID}/secrets", a.requireSession(http.HandlerFunc(a.handleListSecrets)))
-	mux.Handle("POST "+a.managementBase+"/applications/{appID}/environments/{envID}/secrets", a.requireSession(http.HandlerFunc(a.handleCreateSecret)))
-	mux.Handle("POST "+a.managementBase+"/secrets/{secretID}/versions", a.requireSession(http.HandlerFunc(a.handleCreateSecretVersion)))
-	mux.Handle("PUT "+a.managementBase+"/secrets/{secretID}/binding", a.requireSession(http.HandlerFunc(a.handleUpdateBinding)))
-	mux.Handle("GET "+a.managementBase+"/applications/{appID}/environments/{envID}/draft", a.requireSession(http.HandlerFunc(a.handleGetDraft)))
-	mux.Handle("PUT "+a.managementBase+"/applications/{appID}/environments/{envID}/draft", a.requireSession(http.HandlerFunc(a.handleUpdateDraft)))
-	mux.Handle("POST "+a.managementBase+"/applications/{appID}/environments/{envID}/publish", a.requireSession(http.HandlerFunc(a.handlePublish)))
-	mux.Handle("POST "+a.managementBase+"/applications/{appID}/environments/{envID}/rollback", a.requireSession(http.HandlerFunc(a.handleRollback)))
-	mux.Handle("GET "+a.managementBase+"/applications/{appID}/environments/{envID}/revisions", a.requireSession(http.HandlerFunc(a.handleListRevisions)))
-	mux.Handle("GET "+a.managementBase+"/node-groups", a.requireSession(http.HandlerFunc(a.handleListNodeGroups)))
-	mux.Handle("POST "+a.managementBase+"/node-groups", a.requireSession(http.HandlerFunc(a.handleCreateNodeGroup)))
-	mux.Handle("POST "+a.managementBase+"/node-groups/{groupID}/nodes", a.requireSession(http.HandlerFunc(a.handleAddGroupMember)))
-	mux.Handle("DELETE "+a.managementBase+"/node-groups/{groupID}/nodes/{nodeID}", a.requireSession(http.HandlerFunc(a.handleRemoveGroupMember)))
-	mux.Handle("GET "+a.managementBase+"/assignments", a.requireSession(http.HandlerFunc(a.handleListAssignments)))
-	mux.Handle("POST "+a.managementBase+"/assignments", a.requireSession(http.HandlerFunc(a.handleCreateAssignment)))
-	mux.Handle("GET "+a.managementBase+"/assignments/{assignmentID}", a.requireSession(http.HandlerFunc(a.handleUnassignmentState)))
-	mux.Handle("POST "+a.managementBase+"/assignments/{assignmentID}/unassign", a.requireSession(http.HandlerFunc(a.handleUnassign)))
-	mux.Handle("POST "+a.managementBase+"/assignments/{assignmentID}/abandon-cleanup", a.requireSession(http.HandlerFunc(a.handleAbandonCleanup)))
-	mux.Handle("GET "+a.managementBase+"/applications/{appID}/environments/{envID}/activation-policy", a.requireSession(http.HandlerFunc(a.handleGetActivationPolicy)))
-	mux.Handle("PUT "+a.managementBase+"/applications/{appID}/environments/{envID}/activation-policy", a.requireSession(http.HandlerFunc(a.handlePutActivationPolicy)))
-	mux.Handle("GET "+a.managementBase+"/nodes", a.requireSession(http.HandlerFunc(a.handleListNodes)))
+	a.identityHandler.Register(mux, a.managementBase, a.requireSession)
+	a.secretsHandler.Register(mux, a.managementBase, a.requireSession)
+	a.fleetHandler.Register(mux, a.managementBase, a.agentBase, a.requireSession, a.agentAuth)
 	mux.Handle("GET "+a.managementBase+"/overview", a.requireSession(http.HandlerFunc(a.handleOverview)))
 	mux.Handle("GET "+a.managementBase+"/search", a.requireSession(http.HandlerFunc(a.handleSearch)))
-	mux.Handle("POST "+a.managementBase+"/nodes/install-command", a.requireSession(http.HandlerFunc(a.handleInstallCommand)))
 	mux.Handle("GET "+a.managementBase+"/audit-events", a.requireSession(http.HandlerFunc(a.handleListAudit)))
-
-	// Agent surface: public pre-certificate routes plus mTLS-protected routes.
 	mux.HandleFunc("GET "+a.agentBase+"/health", a.handleHealth)
-	mux.HandleFunc("GET "+a.agentBase+"/install.sh", a.handleInstallScript)
-	mux.HandleFunc("GET "+a.agentBase+"/ca.pem", a.handleCAPEM)
-	mux.HandleFunc("GET "+a.agentBase+"/artifacts/{name}", a.handleArtifact)
-	mux.HandleFunc("POST "+a.agentBase+"/enroll", a.handleEnroll)
-	agentAuth := server.AgentIdentityMiddleware(a.cfg.TrustedProxy, a.cfg.CertHeader)
-	mux.Handle("GET "+a.agentBase+"/desired", agentAuth(http.HandlerFunc(a.handleDesired)))
-	mux.Handle("POST "+a.agentBase+"/nodes/{nodeID}/reports", agentAuth(http.HandlerFunc(a.handleReport)))
-	mux.Handle("POST "+a.agentBase+"/nodes/{nodeID}/cleanup", agentAuth(http.HandlerFunc(a.handleCleanupReport)))
-	mux.Handle("POST "+a.agentBase+"/nodes/{nodeID}/heartbeat", agentAuth(http.HandlerFunc(a.handleHeartbeat)))
-
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 	})
 	return a.withRequestLog(mux)
+}
+
+func (a *App) agentAuth(next http.Handler) http.Handler {
+	return middleware.AgentIdentityMiddleware(a.cfg.TrustedProxy, a.cfg.CertHeader)(next)
 }
 
 func (a *App) withRequestLog(next http.Handler) http.Handler {
@@ -176,102 +158,18 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- middleware -----------------------------------------------------------
-
-type sessionKey struct{}
-
-func sessionFrom(r *http.Request) *store.SessionRow {
-	s, _ := r.Context().Value(sessionKey{}).(*store.SessionRow)
-	return s
-}
-
+// requireSession guards the session-authenticated management surface.
 func (a *App) requireSession(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session, ok := a.sessionFromRequest(r)
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
-			return
-		}
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			provided := r.Header.Get(csrfHeader)
-			providedHash := crypto.HashToken(provided)
-			if subtle.ConstantTimeCompare([]byte(providedHash), []byte(crypto.HashToken(session.CSRFToken))) != 1 {
-				writeError(w, http.StatusForbidden, "forbidden", "invalid CSRF token")
-				return
-			}
-			// Mutations are deliberate interactions: slide the idle window.
-			now := a.now()
-			_ = a.store.TouchSessionActivity(r.Context(), session.SessionIDHash, now, now.Add(sessionIdleTTL))
-		}
-		ctx := context.WithValue(r.Context(), sessionKey{}, session)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
-
-// sessionFromRequest resolves the session cookie without requiring it: /me
-// needs the bootstrap state anonymously while still recognizing a session.
-func (a *App) sessionFromRequest(r *http.Request) (*store.SessionRow, bool) {
-	cookie, err := r.Cookie(sessionCookie)
-	if err != nil || cookie.Value == "" {
-		return nil, false
-	}
-	session, err := a.store.SessionByID(r.Context(), crypto.HashToken(cookie.Value), a.now())
-	if err != nil {
-		return nil, false
-	}
-	return session, true
+	return middleware.RequireSession(a.store, a.now)(next)
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
+	middleware.WriteJSON(w, code, body)
 }
 
 // writeError emits the unified error envelope. The machine-readable code is
 // part of the API contract (api/openapi.yaml): clients must match on code,
 // never on the human-readable message.
 func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg, "code": code})
+	middleware.WriteError(w, status, code, msg)
 }
-
-// Error codes exposed by the management API. Extend the enum in
-// api/openapi.yaml together with this list.
-const (
-	codeBadRequest            = "bad_request"
-	codeUnauthorized          = "unauthorized"
-	codeForbidden             = "forbidden"
-	codeNotFound              = "not_found"
-	codeConflict              = "conflict"
-	codeDuplicate             = "duplicate"
-	codeInternal              = "internal"
-	codeUnavailable           = "unavailable"
-	codeStepUp                = "step_up_required"
-	codeMFAEnrollmentRequired = "mfa_enrollment_required"
-)
-
-func actorFrom(r *http.Request) string {
-	if s := sessionFrom(r); s != nil {
-		return "admin:" + s.Username
-	}
-	if serial, ok := server.AgentSerialFromContext(r.Context()); ok {
-		return "node:" + serial
-	}
-	return "anonymous"
-}
-
-func (a *App) correlationID(r *http.Request) string {
-	if id := r.Header.Get("X-Correlation-ID"); id != "" {
-		return id
-	}
-	return fmt.Sprintf("%d", a.now().UnixNano())
-}
-
-var (
-	errNotFound     = store.ErrNotFound
-	errDuplicate    = store.ErrDuplicate
-	errConflict     = store.ErrConflict
-	errBadPayload   = store.ErrBadPayload
-	errBadSelection = store.ErrBadPayload
-	errNoSecrets    = store.ErrNoSecrets
-)

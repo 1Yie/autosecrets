@@ -2,8 +2,9 @@ package app
 
 import (
 	"net/http"
+	"time"
 
-	"autosecrets.dev/core/internal/store"
+	"autosecrets.dev/core/internal/database"
 )
 
 // handleOverview serves one timestamped, read-only projection: asset and
@@ -25,13 +26,13 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	audit, err := a.store.ListAudit(r.Context(), store.AuditFilter{Limit: 5})
+	audit, err := a.store.ListAudit(r.Context(), database.AuditFilter{Limit: 5})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"generated_at":     timeString(a.now()),
+		"generated_at":     a.now().UTC().Format(time.RFC3339),
 		"counts":           counts,
 		"attention":        attention,
 		"recent_publishes": revisions,

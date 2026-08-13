@@ -14,7 +14,8 @@ import (
 	"autosecrets.dev/core/internal/app"
 	"autosecrets.dev/core/internal/config"
 	"autosecrets.dev/core/internal/crypto"
-	"autosecrets.dev/core/internal/store"
+	"autosecrets.dev/core/internal/database"
+	"autosecrets.dev/core/internal/identity"
 )
 
 var version = "dev"
@@ -32,11 +33,14 @@ func main() {
 	defer stop()
 
 	keysDir := config.KeysDir()
-	st, err := store.Connect(ctx, config.DatabaseDSN())
+	st, err := database.Connect(ctx, config.DatabaseDSN())
 	if err != nil {
 		log.Fatalf("database error: %v", err)
 	}
 	defer st.Close()
+	if err := st.ValidateSingleAdministrator(ctx); err != nil {
+		log.Fatalf("identity data error: %v", err)
+	}
 
 	mk, err := crypto.LoadOrCreateMasterKey(keysDir)
 	if err != nil {
@@ -50,14 +54,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("signing key error: %v", err)
 	}
+	var oidcClient *identity.OIDCClient
+	oidcUnavailable := ""
+	if err := cfg.OIDCConfigurationError(); err != nil {
+		oidcUnavailable = err.Error()
+	} else {
+		oidcClient, err = identity.DiscoverOIDC(ctx, identity.OIDCConfig{
+			PublicURL: cfg.PublicURL, IssuerURL: cfg.OIDCIssuerURL, ClientID: cfg.OIDCClientID,
+			ClientSecret: cfg.OIDCClientSecret, Scopes: cfg.OIDCScopes,
+		})
+		if err != nil {
+			oidcUnavailable = err.Error()
+			log.Printf("OIDC unavailable; local login remains enabled: %v", err)
+		}
+	}
 
 	application := app.New(st, mk, ca, signer, cfg.ManagementBase, cfg.AgentBase, app.Options{
 		Version:         cfg.Version,
+		PublicURL:       cfg.PublicURL,
 		PublicAgentURL:  config.PublicAgentURL(),
 		ArtifactDir:     config.ArtifactDir(),
 		InstallCurlOpts: config.InstallCurlOpts(),
 		TrustedProxy:    cfg.TrustedProxyCIDRs,
 		CertHeader:      cfg.ProxyCertHeader,
+		OIDCClient:      oidcClient,
+		OIDCUnavailable: oidcUnavailable,
 	})
 	if _, err := application.EmitBootstrapCode(ctx); err != nil {
 		log.Fatalf("bootstrap code error: %v", err)

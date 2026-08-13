@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -17,6 +18,11 @@ type Config struct {
 	TrustedProxyCIDRs []*net.IPNet
 	ProxyCertHeader   string
 	Version           string
+	PublicURL         string
+	OIDCIssuerURL     string
+	OIDCClientID      string
+	OIDCClientSecret  string
+	OIDCScopes        []string
 }
 
 const (
@@ -74,7 +80,59 @@ func FromEnv() (Config, error) {
 		TrustedProxyCIDRs: cidrs,
 		ProxyCertHeader:   envOr("CORE_PROXY_CERT_HEADER", defaultCertHeader),
 		Version:           os.Getenv("CORE_VERSION"),
+		PublicURL:         strings.TrimRight(os.Getenv("CORE_PUBLIC_URL"), "/"),
+		OIDCIssuerURL:     strings.TrimRight(os.Getenv("CORE_OIDC_ISSUER_URL"), "/"),
+		OIDCClientID:      os.Getenv("CORE_OIDC_CLIENT_ID"),
+		OIDCClientSecret:  os.Getenv("CORE_OIDC_CLIENT_SECRET"),
+		OIDCScopes:        oidcScopes(os.Getenv("CORE_OIDC_SCOPES")),
 	}, nil
+}
+
+// OIDCConfigurationError reports why OIDC is unavailable without making
+// local authentication configuration fail.
+func (c Config) OIDCConfigurationError() error {
+	configured := c.PublicURL != "" || c.OIDCIssuerURL != "" || c.OIDCClientID != "" || c.OIDCClientSecret != ""
+	if !configured {
+		return fmt.Errorf("OIDC is not configured")
+	}
+	if c.PublicURL == "" || c.OIDCIssuerURL == "" || c.OIDCClientID == "" {
+		return fmt.Errorf("CORE_PUBLIC_URL, CORE_OIDC_ISSUER_URL, and CORE_OIDC_CLIENT_ID are required")
+	}
+	publicURL, err := url.Parse(c.PublicURL)
+	if err != nil || publicURL.Host == "" || publicURL.Path != "" || publicURL.RawQuery != "" || publicURL.Fragment != "" {
+		return fmt.Errorf("CORE_PUBLIC_URL must be a canonical origin")
+	}
+	if publicURL.Scheme != "https" && !(publicURL.Scheme == "http" && isLoopbackHost(publicURL.Hostname())) {
+		return fmt.Errorf("CORE_PUBLIC_URL must use HTTPS except on localhost")
+	}
+	issuer, err := url.Parse(c.OIDCIssuerURL)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.RawQuery != "" || issuer.Fragment != "" {
+		if err == nil && issuer.Scheme == "http" && isLoopbackHost(issuer.Hostname()) && issuer.Host != "" {
+			return nil
+		}
+		return fmt.Errorf("CORE_OIDC_ISSUER_URL must be an HTTPS URL except on localhost")
+	}
+	return nil
+}
+
+func oidcScopes(raw string) []string {
+	if raw == "" {
+		return []string{"openid", "profile"}
+	}
+	seen := map[string]bool{"openid": true}
+	result := []string{"openid"}
+	for _, scope := range strings.Fields(strings.ReplaceAll(raw, ",", " ")) {
+		if scope == "offline_access" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		result = append(result, scope)
+	}
+	return result
+}
+
+func isLoopbackHost(host string) bool {
+	return host == "localhost" || net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
 }
 
 // ParseCIDRs parses CIDR notation only. Bare IPs are rejected so the trusted

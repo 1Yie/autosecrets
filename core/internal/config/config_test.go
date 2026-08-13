@@ -68,3 +68,42 @@ func TestParseCIDRsEmpty(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestOIDCConfigurationIsOptionalAndValidatedSeparately(t *testing.T) {
+	for _, key := range []string{"CORE_PUBLIC_URL", "CORE_OIDC_ISSUER_URL", "CORE_OIDC_CLIENT_ID", "CORE_OIDC_CLIENT_SECRET", "CORE_OIDC_SCOPES"} {
+		t.Setenv(key, "")
+	}
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OIDCConfigurationError() == nil {
+		t.Fatal("missing OIDC configuration reported as available")
+	}
+
+	t.Setenv("CORE_PUBLIC_URL", "http://localhost:8080")
+	t.Setenv("CORE_OIDC_ISSUER_URL", "http://127.0.0.1:5556")
+	t.Setenv("CORE_OIDC_CLIENT_ID", "autosecrets")
+	t.Setenv("CORE_OIDC_SCOPES", "profile,email,offline_access")
+	cfg, err = FromEnv()
+	if err != nil || cfg.OIDCConfigurationError() != nil {
+		t.Fatalf("valid development OIDC config rejected: %v / %v", err, cfg.OIDCConfigurationError())
+	}
+	want := []string{"openid", "profile", "email"}
+	if !reflect.DeepEqual(cfg.OIDCScopes, want) {
+		t.Fatalf("scopes = %v, want %v", cfg.OIDCScopes, want)
+	}
+}
+
+func TestOIDCConfigurationRejectsInsecurePublicURLWithoutBreakingFromEnv(t *testing.T) {
+	t.Setenv("CORE_PUBLIC_URL", "http://example.com")
+	t.Setenv("CORE_OIDC_ISSUER_URL", "https://id.example.com")
+	t.Setenv("CORE_OIDC_CLIENT_ID", "autosecrets")
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OIDCConfigurationError() == nil {
+		t.Fatal("insecure production public URL accepted")
+	}
+}

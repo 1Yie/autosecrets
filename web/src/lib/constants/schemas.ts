@@ -23,16 +23,15 @@ export const bootstrapSchema = z.object({
 export const loginSchema = z.object({
   username: z.string().min(1, "请输入用户名"),
   password: z.string().min(1, "请输入密码"),
+});
+
+export const secondFactorSchema = z.object({
   totp_code: z.string().regex(/^\d{6}$/, "请输入 6 位动态验证码").optional().or(z.literal("")),
   recovery_code: z.string().optional().or(z.literal("")),
 });
 
 export const mfaVerifySchema = z.object({
   totp_code: z.string().regex(/^\d{6}$/, "请输入 6 位动态验证码"),
-});
-
-export const stepUpSchema = z.object({
-  password: z.string().min(1, "请输入当前密码"),
 });
 
 export const operationReasonSchema = z.object({
@@ -80,8 +79,8 @@ export const nodeNameSchema = nameSchema;
 
 export type BootstrapForm = z.infer<typeof bootstrapSchema>;
 export type LoginForm = z.infer<typeof loginSchema>;
+export type SecondFactorForm = z.infer<typeof secondFactorSchema>;
 export type MFAVerifyForm = z.infer<typeof mfaVerifySchema>;
-export type StepUpForm = z.infer<typeof stepUpSchema>;
 export type OperationReasonForm = z.infer<typeof operationReasonSchema>;
 export type SecretForm = z.infer<typeof secretSchema>;
 export type BindingForm = z.infer<typeof bindingSchema>;

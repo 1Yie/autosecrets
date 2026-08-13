@@ -30,7 +30,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start MFA enrollment for the first Administrator with the one-time Bootstrap Code */
+        /** Activate the single Administrator with the one-time Bootstrap Code */
         post: operations["bootstrap"];
         delete?: never;
         options?: never;
@@ -47,9 +47,60 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Complete password plus MFA login and receive a session cookie plus CSRF token */
+        /** Verify the local username and password, then either issue a Session or require the second-factor step */
         post: operations["login"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/login/second-factor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete a local login challenge with TOTP or a Recovery Code */
+        post: operations["completeLocalLogin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/totp/enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a fresh TOTP enrollment after password re-authentication */
+        post: operations["startTOTPEnrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/totp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disable local TOTP after password and current-TOTP proof */
+        delete: operations["disableTOTP"];
         options?: never;
         head?: never;
         patch?: never;
@@ -66,23 +117,6 @@ export interface paths {
         put?: never;
         /** Verify a pending member's TOTP enrollment and display Recovery Codes once */
         post: operations["verifyMFAEnrollment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/mfa-enrollment/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Start MFA enrollment for an existing active member without TOTP */
-        post: operations["resumeMFAEnrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -115,7 +149,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Replace the current Session after full MFA */
+        /** Replace the current Session after proof required by the local TOTP policy */
         post: operations["renewSession"];
         delete?: never;
         options?: never;
@@ -132,8 +166,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Grant five minutes of Step-up Authentication after password confirmation */
-        post: operations["stepUp"];
+        /** Issue a short-lived grant after proof required by the local TOTP policy */
+        post: operations["stepUpAuthentication"];
         delete?: never;
         options?: never;
         head?: never;
@@ -149,9 +183,95 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Change password after current password and TOTP confirmation */
+        /** Change password after current password and TOTP when the local policy requires it */
         post: operations["changePassword"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Minimal anonymous OIDC availability and binding state */
+        get: operations["getOIDCStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Start an anonymous OIDC authorization-code transaction */
+        get: operations["startOIDCLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Validate the authorization response and complete login or binding */
+        get: operations["completeOIDCTransaction"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/security": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Authenticated local TOTP policy and OIDC binding/configuration state */
+        get: operations["getAuthenticationSecurity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-authenticate locally and start an External Identity Binding transaction */
+        post: operations["startOIDCBinding"];
+        /** Re-authenticate locally and remove the External Identity Binding */
+        delete: operations["deleteOIDCBinding"];
         options?: never;
         head?: never;
         patch?: never;
@@ -605,9 +725,44 @@ export interface components {
             id: string;
             username: string;
             /** @enum {string} */
-            status: "pending_mfa";
+            status: "active";
+            csrf_token: string;
+            /** @enum {string} */
+            role: "administrator";
+            /** Format: date-time */
+            expires_at: string;
+        };
+        SecondFactorRequired: {
+            /** @enum {string} */
+            status: "second_factor_required";
+            /** @enum {string} */
+            code: "second_factor_required";
+        };
+        TOTPEnrollmentStarted: {
+            username: string;
             enrollment_token: string;
             totp_uri: string;
+        };
+        OIDCPublicStatus: {
+            available: boolean;
+            bound: boolean;
+            login_available: boolean;
+        };
+        OIDCBindingProof: {
+            password: string;
+            totp_code?: string;
+            return_to?: string;
+        };
+        AuthenticationSecurity: {
+            totp_login_required: boolean;
+            oidc: {
+                available: boolean;
+                bound: boolean;
+                /** Format: uri */
+                issuer?: string;
+                display_name?: string;
+                configuration_error?: string;
+            };
         };
         LoginResponse: {
             csrf_token: string;
@@ -654,7 +809,9 @@ export interface components {
             session_expires_at: string;
             /** Format: date-time */
             idle_expires_at: string;
-            step_up: boolean;
+            totp_login_required: boolean;
+            /** @enum {string} */
+            auth_method: "local" | "oidc";
         };
         Application: {
             id: string;
@@ -843,7 +1000,7 @@ export interface components {
              * @description Stable machine-readable code; switch on this
              * @enum {string}
              */
-            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "duplicate" | "internal" | "unavailable" | "step_up_required" | "payload_too_large" | "activation_policy_required" | "mfa_enrollment_required";
+            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "duplicate" | "internal" | "unavailable" | "payload_too_large" | "mfa_enrollment_required" | "second_factor_required" | "challenge_expired" | "rate_limited";
         };
     };
     responses: {
@@ -904,6 +1061,17 @@ export interface components {
         /** @description Dependency or configuration missing (e.g. install flow disabled) */
         Unavailable: {
             headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description Authentication attempt rate limit exceeded */
+        RateLimited: {
+            headers: {
+                /** @description Seconds until the current failure window expires */
+                "Retry-After"?: number;
                 [name: string]: unknown;
             };
             content: {
@@ -971,9 +1139,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Pending Administrator MFA enrollment created */
+            /** @description Active Administrator and Session created */
             201: {
                 headers: {
+                    /** @description autosecrets_session (HttpOnly, SameSite=Lax) */
+                    "Set-Cookie"?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -997,10 +1167,6 @@ export interface operations {
                 "application/json": {
                     username: string;
                     password: string;
-                    /** @description Six digit TOTP code; exactly one of totp_code or recovery_code is required */
-                    totp_code?: string;
-                    /** @description Single-use Recovery Code; exactly one of totp_code or recovery_code is required */
-                    recovery_code?: string;
                 };
             };
         };
@@ -1014,6 +1180,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Password accepted; a short-lived second-factor challenge was issued */
+            202: {
+                headers: {
+                    /** @description autosecrets_login_challenge (HttpOnly, SameSite=Lax) */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecondFactorRequired"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    completeLocalLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    totp_code?: string;
+                    recovery_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Authenticated; Set-Cookie carries the Session */
+            200: {
+                headers: {
+                    /** @description autosecrets_session and expired challenge cookie */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    startTOTPEnrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Fresh enrollment with a one-time TOTP URI */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TOTPEnrollmentStarted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    disableTOTP: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                    totp_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description TOTP disabled and credentials removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        totp_login_required: false;
+                    };
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -1049,40 +1322,6 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-        };
-    };
-    resumeMFAEnrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    username: string;
-                    password: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Fresh enrollment with a one-time TOTP URI */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        username: string;
-                        enrollment_token: string;
-                        totp_uri: string;
-                    };
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
         };
     };
@@ -1141,7 +1380,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    stepUp: {
+    stepUpAuthentication: {
         parameters: {
             query?: never;
             header?: never;
@@ -1150,13 +1389,11 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    password: string;
-                };
+                "application/json": components["schemas"]["FullMFARequest"];
             };
         };
         responses: {
-            /** @description Step-up Grant issued */
+            /** @description Session-bound Step-up Grant issued */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1185,7 +1422,7 @@ export interface operations {
                 "application/json": {
                     current_password: string;
                     new_password: string;
-                    totp_code: string;
+                    totp_code?: string;
                 };
             };
         };
@@ -1202,6 +1439,157 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getOIDCStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OIDC availability without operational diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OIDCPublicStatus"];
+                };
+            };
+        };
+    };
+    startOIDCLogin: {
+        parameters: {
+            query?: {
+                return_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the discovered Provider authorization endpoint */
+            302: {
+                headers: {
+                    Location?: string;
+                    /** @description Short-lived autosecrets_oidc_state cookie */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    completeOIDCTransaction: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OIDC transaction completed and redirected to a validated local path */
+            302: {
+                headers: {
+                    Location?: string;
+                    /** @description Expired state cookie and, for login, the AutoSecrets Session */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getAuthenticationSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sanitized authentication security state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthenticationSecurity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    startOIDCBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCBindingProof"];
+            };
+        };
+        responses: {
+            /** @description Provider authorization URL for the binding transaction */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorization_url: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteOIDCBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCBindingProof"];
+            };
+        };
+        responses: {
+            /** @description External Identity Binding removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        bound: false;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     logout: {

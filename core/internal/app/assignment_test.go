@@ -1,11 +1,8 @@
 package app
 
 import (
-	"context"
 	"net/http"
 	"testing"
-
-	"autosecrets.dev/core/internal/crypto"
 )
 
 func assignBody(a authoring, groupID string) map[string]any {
@@ -92,10 +89,10 @@ func TestAssignmentNodeAmbiguity(t *testing.T) {
 	}
 }
 
-// TestAssignmentOptionalReasonAndProtectedStepUp locks the risk policy
+// TestAssignmentOptionalReason locks the risk policy
 // after the 2026-08 product decision: Assignment reasons are optional, and
 // Protected Environments need a current Step-up Grant.
-func TestAssignmentOptionalReasonAndProtectedStepUp(t *testing.T) {
+func TestAssignmentOptionalReason(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
 	ta.putPolicy(t, a)
@@ -110,7 +107,8 @@ func TestAssignmentOptionalReasonAndProtectedStepUp(t *testing.T) {
 		t.Fatalf("assignment without operation reason must succeed: %d %s", noReason.status, noReason.raw)
 	}
 
-	// Protected Environment: assignment requires Step-up.
+	// Protected Environment: assignment works without any password
+	// confirmation (Step-up removed by product decision 2026-08).
 	prot := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
 		map[string]string{"name": "prod", "protection": "protected"}, a.cookie, a.csrf)
 	prod := authoring{appID: a.appID, envID: prot.body["id"].(string), cookie: a.cookie, csrf: a.csrf}
@@ -121,25 +119,7 @@ func TestAssignmentOptionalReasonAndProtectedStepUp(t *testing.T) {
 	if pub.status != http.StatusCreated {
 		t.Fatalf("protected publish: %d %s", pub.status, pub.raw)
 	}
-	if err := ta.store.RevokeStepUp(context.Background(), crypto.HashToken(a.cookie)); err != nil {
-		t.Fatal(err)
-	}
 	g2 := ta.do(t, "POST", "/api/v1/node-groups", map[string]string{"name": "g2"}, a.cookie, a.csrf)
-	denied := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
-		"group_id": g2.body["id"].(string), "application_id": a.appID,
-		"environment_id": prod.envID,
-		"operation_reason": map[string]string{
-			"category": "maintenance", "explanation": "assign the production bundle",
-		},
-	}, a.cookie, a.csrf)
-	if denied.status != http.StatusForbidden || denied.body["code"] != "step_up_required" {
-		t.Fatalf("protected assignment without step-up: %d %s", denied.status, denied.raw)
-	}
-	stepUp := ta.do(t, "POST", "/api/v1/auth/step-up",
-		map[string]string{"password": "correct-horse-42"}, a.cookie, a.csrf)
-	if stepUp.status != http.StatusOK {
-		t.Fatalf("step-up: %d %s", stepUp.status, stepUp.raw)
-	}
 	allowed := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
 		"group_id": g2.body["id"].(string), "application_id": a.appID,
 		"environment_id": prod.envID,
@@ -148,6 +128,6 @@ func TestAssignmentOptionalReasonAndProtectedStepUp(t *testing.T) {
 		},
 	}, a.cookie, a.csrf)
 	if allowed.status != http.StatusCreated {
-		t.Fatalf("protected assignment with step-up: %d %s", allowed.status, allowed.raw)
+		t.Fatalf("protected assignment: %d %s", allowed.status, allowed.raw)
 	}
 }

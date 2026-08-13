@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"autosecrets.dev/core/internal/crypto"
-	"autosecrets.dev/core/internal/store"
+	"autosecrets.dev/core/internal/database"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Connect returns a *store.Store connected to a real PostgreSQL database with
+// Connect returns a *database.Store connected to a real PostgreSQL database with
 // all migrations applied. The DSN comes from TEST_DATABASE_URL, which
 // scripts/test-all.sh and CI export after starting the shared PostgreSQL
 // container. Tests fail (not skip) when PostgreSQL is unreachable so a
@@ -34,7 +34,7 @@ import (
 //
 //	dsn := os.Getenv("TEST_DATABASE_URL")
 //	if dsn == "" { dsn = startContainer(t, ctx) }
-func Connect(t *testing.T) *store.Store {
+func Connect(t *testing.T) *database.Store {
 	t.Helper()
 	ctx := context.Background()
 	template := os.Getenv("TEST_DATABASE_URL")
@@ -43,7 +43,7 @@ func Connect(t *testing.T) *store.Store {
 			"container (scripts/test-all.sh does this) and export the DSN")
 	}
 	dbName, dsn := createDatabase(t, ctx, template)
-	st, err := store.Connect(ctx, dsn)
+	st, err := database.Connect(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect postgres: %v", err)
 	}
@@ -123,10 +123,12 @@ func NewKeyMaterial(t *testing.T) (*crypto.MasterKey, *crypto.CA, *crypto.Signer
 
 // Truncate resets every product table so tests share one database without
 // leaking state between them.
-func Truncate(t *testing.T, st *store.Store) {
+func Truncate(t *testing.T, st *database.Store) {
 	t.Helper()
 	_, err := st.Exec(context.Background(), `TRUNCATE organization_config, admins, sessions, bootstrap_codes, audit_events,
 		mfa_enrollments, recovery_codes, step_up_grants, member_invitations,
+		login_challenges, external_identity_binding, oidc_transactions,
+		login_challenges, external_identity_binding, oidc_transactions,
 		applications, environments, secrets, secret_versions, file_bindings,
 		drafts, draft_selections, bundle_revisions, revision_files,
 		nodes, node_groups, group_members, assignments, enrollment_tokens

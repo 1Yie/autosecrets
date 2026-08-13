@@ -1,7 +1,12 @@
-import { RefreshCw } from "lucide-react";
+import { History, RefreshCw, ScrollText, ShieldCheck } from "lucide-react";
 import { useOverview, type OverviewAttention } from "../../hooks/fleet/use-overview";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../../components/ui/empty";
+import { Frame } from "../../components/ui/frame";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../../components/ui/tabs";
 
 const attentionLabels: Record<string, string> = {
   failed_convergence: "密钥同步失败",
@@ -72,59 +77,144 @@ export function OverviewPage() {
         ))}
       </div>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">需要关注</h2>
-        {data.attention.length === 0 ? (
-          <p className="text-sm opacity-60" data-testid="attention-empty">
-            当前没有需要关注的事项。
-          </p>
-        ) : (
-          <ul className="space-y-2" data-testid="attention-list">
-            {data.attention.map((item: OverviewAttention, index) => (
-              <li key={`${item.kind}-${index}`} className="rounded-lg border border-amber-300/40 bg-amber-50 p-3 text-sm dark:bg-amber-950/20">
-                <span className="font-medium">{attentionLabels[item.kind] ?? item.kind}</span>
-                <span className="ml-2 opacity-70">{item.count} 项</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <Tabs defaultValue="attention">
+        <TabsList>
+          <TabsTab value="attention">需要关注</TabsTab>
+          <TabsTab value="updates">最近更新</TabsTab>
+          <TabsTab value="audit">最近审计</TabsTab>
+        </TabsList>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">最近更新</h2>
-        {data.recent_publishes.length === 0 ? (
-          <p className="text-sm opacity-60">暂无更新记录。</p>
-        ) : (
-          <ul className="divide-y rounded-lg border text-sm">
-            {data.recent_publishes.map((revision) => (
-              <li key={revision.id} className="flex items-center justify-between px-3 py-2">
-                <span className="truncate font-mono text-xs opacity-80">{revision.id.slice(0, 8)}</span>
-                <span className="opacity-70">
-                  {revision.operation_reason.category} · {revision.created_by}
-                </span>
-                <span className="opacity-50">{new Date(revision.created_at).toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        <TabsPanel value="attention">
+          <Frame className="w-full">
+            <Table variant="card" className="w-full text-left text-sm">
+              <TableHeader>
+                <TableRow className="border-b opacity-60">
+                  <TableHead className="p-2">事项</TableHead>
+                  <TableHead className="p-2 text-right">数量</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody data-testid="attention-list">
+                {data.attention.length === 0 ? (
+                  <TableRow className="border-b">
+                    <TableCell colSpan={2} className="p-2">
+                      <Empty className="py-8" data-testid="attention-empty">
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <ShieldCheck aria-hidden="true" />
+                          </EmptyMedia>
+                          <EmptyTitle>当前没有需要关注的事项</EmptyTitle>
+                          <EmptyDescription>所有节点与密钥状态正常。</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  data.attention.map((item: OverviewAttention, index) => (
+                    <TableRow key={`${item.kind}-${index}`} className="border-b">
+                      <TableCell className="p-2">
+                        <Badge variant="warning" size="sm">
+                          {attentionLabels[item.kind] ?? item.kind}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="p-2 text-right tabular-nums">{item.count}</TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Frame>
+        </TabsPanel>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">最近审计</h2>
-        {data.recent_audit.length === 0 ? (
-          <p className="text-sm opacity-60">暂无审计事件。</p>
-        ) : (
-          <ul className="divide-y rounded-lg border text-sm">
-            {data.recent_audit.map((event) => (
-              <li key={event.id} className="flex items-center justify-between px-3 py-2">
-                <span className="font-mono text-xs opacity-80">{event.actor}</span>
-                <span className="opacity-70">{event.action}</span>
-                <span className="opacity-50">{new Date(event.created_at).toLocaleString()}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        <TabsPanel value="updates">
+          <Frame className="w-full">
+            <Table variant="card" className="w-full text-left text-sm">
+              <TableHeader>
+                <TableRow className="border-b opacity-60">
+                  <TableHead className="p-2">版本</TableHead>
+                  <TableHead className="p-2">类别</TableHead>
+                  <TableHead className="p-2">操作人</TableHead>
+                  <TableHead className="p-2 text-right">时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.recent_publishes.length === 0 ? (
+                  <TableRow className="border-b">
+                    <TableCell colSpan={4} className="p-2">
+                      <Empty className="py-8">
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <History aria-hidden="true" />
+                          </EmptyMedia>
+                          <EmptyTitle>暂无更新记录</EmptyTitle>
+                          <EmptyDescription>还没有发布任何变更。</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  data.recent_publishes.map((revision) => (
+                    <TableRow key={revision.id} className="border-b">
+                      <TableCell className="p-2 font-mono text-xs text-muted-foreground">
+                        {revision.id.slice(0, 8)}
+                      </TableCell>
+                      <TableCell className="p-2">
+                        <Badge variant="outline" size="sm">{revision.operation_reason.category}</Badge>
+                      </TableCell>
+                      <TableCell className="p-2">{revision.created_by}</TableCell>
+                      <TableCell className="p-2 text-right text-xs text-muted-foreground">
+                        {new Date(revision.created_at).toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Frame>
+        </TabsPanel>
+
+        <TabsPanel value="audit">
+          <Frame className="w-full">
+            <Table variant="card" className="w-full text-left text-sm">
+              <TableHeader>
+                <TableRow className="border-b opacity-60">
+                  <TableHead className="p-2">操作人</TableHead>
+                  <TableHead className="p-2">动作</TableHead>
+                  <TableHead className="p-2 text-right">时间</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.recent_audit.length === 0 ? (
+                  <TableRow className="border-b">
+                    <TableCell colSpan={3} className="p-2">
+                      <Empty className="py-8">
+                        <EmptyHeader>
+                          <EmptyMedia variant="icon">
+                            <ScrollText aria-hidden="true" />
+                          </EmptyMedia>
+                          <EmptyTitle>暂无审计事件</EmptyTitle>
+                          <EmptyDescription>还没有审计记录。</EmptyDescription>
+                        </EmptyHeader>
+                      </Empty>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  data.recent_audit.map((event) => (
+                    <TableRow key={event.id} className="border-b">
+                      <TableCell className="p-2 font-mono text-xs text-muted-foreground">{event.actor}</TableCell>
+                      <TableCell className="p-2">
+                        <Badge variant="outline" size="sm">{event.action}</Badge>
+                      </TableCell>
+                      <TableCell className="p-2 text-right text-xs text-muted-foreground">
+                        {new Date(event.created_at).toLocaleString()}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Frame>
+        </TabsPanel>
+      </Tabs>
     </div>
   );
 }

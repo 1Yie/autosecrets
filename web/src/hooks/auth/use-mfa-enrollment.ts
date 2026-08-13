@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { API_PATHS } from "../../lib/constants/api-paths";
 import { apiPost } from "../../lib/api";
 import { type MFAVerifyForm } from "../../lib/constants/schemas";
+import type { Me } from "./use-me";
 
 export interface BootstrapEnrollment {
   id: string;
@@ -28,12 +29,13 @@ export function useConfirmMFAEnrollment() {
   return useMutation({
     mutationFn: (body: { confirmation_token: string }) =>
       apiPost(API_PATHS.mfaConfirm, body),
-    onSuccess: () => qc.setQueryData(["me"], { bootstrap_required: false }),
-  });
-}
-
-export function useStepUp() {
-  return useMutation({
-    mutationFn: (body: { password: string }) => apiPost(API_PATHS.stepUp, body),
+    onSuccess: () => {
+      qc.setQueryData<Me>(["me"], (current) => current ? {
+        ...current,
+        bootstrap_required: false,
+        totp_login_required: true,
+      } : current);
+      void qc.invalidateQueries({ queryKey: ["me"] });
+    },
   });
 }

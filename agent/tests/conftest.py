@@ -4,10 +4,6 @@ behind the devproxy, and expose its API and the bootstrap code."""
 from __future__ import annotations
 
 import base64
-import base64 as _b64  # noqa: F401  (kept for parity with older fixtures)
-import hashlib
-import hmac
-import struct
 import os
 import re
 import shutil
@@ -146,52 +142,28 @@ def core_stack(tmp_path_factory):
 
 @pytest.fixture(scope="session")
 def admin(core_stack):
-    """Bootstraps the first Administrator through the real MFA enrollment
-    path (Bootstrap -> TOTP verify -> Recovery Code confirm -> MFA login)
-    and returns an authenticated session."""
+    """Bootstraps the password-only Administrator and returns its session."""
     code = core_stack["bootstrap_code"]
     if not code:
         raise AssertionError("no bootstrap code captured from Core logs")
-    status, body, _ = http_json("POST", core_stack["core_url"] + "/api/v1/bootstrap", {
+    status, body, headers = http_json("POST", core_stack["core_url"] + "/api/v1/bootstrap", {
         "code": code, "organization_name": "Agent Test Organization",
         "username": "admin", "password": "correct-horse-42"})
     assert status == 201, body
-    totp_code = _totp_code(_totp_secret(body["totp_uri"]))
-    status, body, _ = http_json("POST",
-        core_stack["core_url"] + "/api/v1/auth/mfa-enrollment/verify", {
-            "enrollment_token": body["enrollment_token"], "totp_code": totp_code})
-    assert status == 200, body
-    status, body, _ = http_json("POST",
-        core_stack["core_url"] + "/api/v1/auth/mfa-enrollment/confirm", {
-            "confirmation_token": body["confirmation_token"]})
-    assert status == 200, body
-    status, body, headers = http_json("POST", core_stack["core_url"] + "/api/v1/auth/login", {
-        "username": "admin", "password": "correct-horse-42", "totp_code": totp_code})
-    assert status == 200, body
     set_cookie = headers.get("Set-Cookie", "")
-    cookie = re.search(r"autosecrets_session=([^;]+)", set_cookie).group(1)
+    cookie_match = re.search(r"autosecrets_session=([^;]+)", set_cookie)
+    assert cookie_match is not None, headers
+    cookie = cookie_match.group(1)
     csrf = body["csrf_token"]
     return {"cookie": f"autosecrets_session={cookie}", "csrf": csrf,
             "core_url": core_stack["core_url"]}
 
-
-def _totp_secret(uri: str) -> str:
-    """Extracts the base32 TOTP secret from an otpauth:// URI."""
-    return dict(pair.split("=", 1) for pair in uri.split("?", 1)[1].split("&"))["secret"]
-
-
-def _totp_code(secret: str) -> str:
-    """RFC 6238 TOTP with the same 30s period and 6 digits as Core."""
-    key = base64.b32decode(secret.upper())
-    counter = int(__import__("time").time() // 30)
-    message = struct.pack(">Q", counter)
-    digest = hmac.new(key, message, hashlib.sha1).digest()
-    offset = digest[-1] & 0x0F
-    value = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000
-    return f"{value:06d}"
-
-
-def api(admin_session, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+def api(
+    admin_session,
+    method: str,
+    path: str,
+    body: dict | None = None,
+) -> tuple[int, dict, dict[str, str]]:
     return http_json(method, admin_session["core_url"] + path, body,
                      cookies=admin_session["cookie"],
                      headers={"X-CSRF-Token": admin_session["csrf"]})

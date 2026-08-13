@@ -84,6 +84,37 @@ class TestMaterialize:
         assert legacy.read_bytes() == b"legacy-data"
         assert (bundle / "Token").read_bytes() == b"new"
 
+    def test_nested_bindings_share_directory(self, tmp_path):
+        bundle = tmp_path / "bundles"
+        materialize(bundle, [f("A/1", b"one"), f("A/2", b"two"), f("A/3", b"three")])
+        assert (bundle / "A" / "1").read_bytes() == b"one"
+        assert (bundle / "A" / "2").read_bytes() == b"two"
+        assert (bundle / "A" / "3").read_bytes() == b"three"
+
+    def test_flat_file_becomes_directory(self, tmp_path):
+        bundle = tmp_path / "bundles"
+        # A previous flat binding materialized a FILE at "aaa".
+        materialize(bundle, [f("aaa", b"old")])
+        assert (bundle / "aaa").is_file()
+        # A nested binding "aaa/11" must replace the file with a directory.
+        materialize(bundle, [f("aaa/11", b"new")])
+        assert (bundle / "aaa").is_dir()
+        assert (bundle / "aaa" / "11").read_bytes() == b"new"
+
+    def test_parent_symlink_cannot_escape_bundle_root(self, tmp_path):
+        bundle = tmp_path / "bundles"
+        outside = tmp_path / "outside"
+        bundle.mkdir()
+        outside.mkdir()
+        (bundle / "linked").symlink_to(outside, target_is_directory=True)
+
+        materialize(bundle, [f("linked/secret", b"inside")])
+
+        assert (bundle / "linked").is_dir()
+        assert not (bundle / "linked").is_symlink()
+        assert (bundle / "linked" / "secret").read_bytes() == b"inside"
+        assert not (outside / "secret").exists()
+
     def test_cleanup_removes_only_manifest_files(self, tmp_path):
         from autosecrets_agent.materializer import (
             remove_manifest_files,
@@ -103,3 +134,26 @@ class TestMaterialize:
         assert not (bundle / "b.conf").exists()
         assert foreign.exists(), "files outside the manifest must survive cleanup"
         assert not (identity_dir / "manifests" / "app-1_env-1.json").exists()
+
+    def test_cleanup_skips_parent_symlink_outside_bundle_root(self, tmp_path):
+        from autosecrets_agent.materializer import (
+            remove_manifest_files,
+            save_manifest,
+        )
+        bundle = tmp_path / "bundles"
+        identity_dir = tmp_path / "identity"
+        outside = tmp_path / "outside"
+        files = [f("linked/secret", b"same-content")]
+        materialize(bundle, files)
+        save_manifest(identity_dir, "app-1", "env-1", files)
+        (bundle / "linked" / "secret").unlink()
+        (bundle / "linked").rmdir()
+        outside.mkdir()
+        external = outside / "secret"
+        external.write_bytes(b"same-content")
+        (bundle / "linked").symlink_to(outside, target_is_directory=True)
+
+        removed = remove_manifest_files(identity_dir, bundle, "app-1", "env-1")
+
+        assert removed == 0
+        assert external.read_bytes() == b"same-content"

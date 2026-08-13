@@ -1,7 +1,9 @@
 openapi: 3.0.3
 servers:
   - url: /
-    description: Relative to the Core management hostname (e.g. https://core.example.com/api/v1/...)
+    description: >-
+      Relative to the Core management hostname (e.g.
+      https://core.example.com/api/v1/...)
 info:
   title: AutoSecrets Core Management API
   version: v1
@@ -21,7 +23,7 @@ info:
     Error model: every error response carries {"error": string, "code": string}.
     Clients must switch on `code`, never on the human-readable `error` message.
     Codes: bad_request, unauthorized, forbidden, not_found, conflict, duplicate,
-    internal, unavailable, step_up_required, payload_too_large.
+    internal, unavailable, payload_too_large.
 security:
   - sessionCookie: []
 tags:
@@ -47,7 +49,8 @@ paths:
     post:
       operationId: bootstrap
       tags: [Identity]
-      summary: Start MFA enrollment for the first Administrator with the one-time Bootstrap Code
+      summary: >-
+        Activate the single Administrator with the one-time Bootstrap Code
       security: []
       requestBody:
         required: true
@@ -59,7 +62,8 @@ paths:
               properties:
                 code:
                   type: string
-                  description: One-time Bootstrap Code printed by Core on first boot
+                  description: >-
+                    One-time Bootstrap Code printed by Core on first boot
                 organization_name:
                   type: string
                   minLength: 1
@@ -70,10 +74,16 @@ paths:
                 password:
                   type: string
                   minLength: 12
-                  description: Argon2id-hashed server-side; never stored in clear
+                  description: >-
+                    Argon2id-hashed server-side; never stored in clear
       responses:
         "201":
-          description: Pending Administrator MFA enrollment created
+          description: Active Administrator and Session created
+          headers:
+            Set-Cookie:
+              description: autosecrets_session (HttpOnly, SameSite=Lax)
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -88,7 +98,9 @@ paths:
     post:
       operationId: login
       tags: [Identity]
-      summary: Complete password plus MFA login and receive a session cookie plus CSRF token
+      summary: >-
+        Verify the local username and password, then either issue a Session
+        or require the second-factor step
       security: []
       requestBody:
         required: true
@@ -102,12 +114,6 @@ paths:
                   type: string
                 password:
                   type: string
-                totp_code:
-                  type: string
-                  description: Six digit TOTP code; exactly one of totp_code or recovery_code is required
-                recovery_code:
-                  type: string
-                  description: Single-use Recovery Code; exactly one of totp_code or recovery_code is required
       responses:
         "200":
           description: Authenticated; Set-Cookie carries the session
@@ -120,6 +126,121 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
+        "202":
+          description: Password accepted; a short-lived second-factor challenge was issued
+          headers:
+            Set-Cookie:
+              description: autosecrets_login_challenge (HttpOnly, SameSite=Lax)
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecondFactorRequired"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/login/second-factor:
+    post:
+      operationId: completeLocalLogin
+      tags: [Identity]
+      summary: Complete a local login challenge with TOTP or a Recovery Code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                totp_code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                recovery_code:
+                  type: string
+      responses:
+        "200":
+          description: Authenticated; Set-Cookie carries the Session
+          headers:
+            Set-Cookie:
+              description: autosecrets_session and expired challenge cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+  /api/v1/auth/totp/enrollment:
+    post:
+      operationId: startTOTPEnrollment
+      tags: [Identity]
+      summary: Start a fresh TOTP enrollment after password re-authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+      responses:
+        "201":
+          description: Fresh enrollment with a one-time TOTP URI
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TOTPEnrollmentStarted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/v1/auth/totp:
+    delete:
+      operationId: disableTOTP
+      tags: [Identity]
+      summary: Disable local TOTP after password and current-TOTP proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, totp_code]
+              properties:
+                password:
+                  type: string
+                totp_code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "200":
+          description: TOTP disabled and credentials removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [totp_login_required]
+                properties:
+                  totp_login_required:
+                    type: boolean
+                    enum: [false]
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -130,8 +251,9 @@ paths:
     post:
       operationId: verifyMFAEnrollment
       tags: [Identity]
-      summary: Verify a pending member's TOTP enrollment and display Recovery Codes once
-      security: []
+      summary: >-
+        Verify a pending member's TOTP enrollment and display Recovery Codes
+        once
       requestBody:
         required: true
         content:
@@ -159,51 +281,11 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
-  /api/v1/auth/mfa-enrollment/resume:
-    post:
-      operationId: resumeMFAEnrollment
-      tags: [Identity]
-      summary: Start MFA enrollment for an existing active member without TOTP
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password]
-              properties:
-                username:
-                  type: string
-                password:
-                  type: string
-      responses:
-        "200":
-          description: Fresh enrollment with a one-time TOTP URI
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [username, enrollment_token, totp_uri]
-                properties:
-                  username:
-                    type: string
-                  enrollment_token:
-                    type: string
-                  totp_uri:
-                    type: string
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "409":
-          $ref: "#/components/responses/Conflict"
   /api/v1/auth/mfa-enrollment/confirm:
     post:
       operationId: confirmMFAEnrollment
       tags: [Identity]
       summary: Confirm Recovery Code display and activate the pending member
-      security: []
       requestBody:
         required: true
         content:
@@ -229,7 +311,7 @@ paths:
     post:
       operationId: renewSession
       tags: [Identity]
-      summary: Replace the current Session after full MFA
+      summary: Replace the current Session after proof required by the local TOTP policy
       requestBody:
         required: true
         content:
@@ -251,22 +333,18 @@ paths:
           $ref: "#/components/responses/Forbidden"
   /api/v1/auth/step-up:
     post:
-      operationId: stepUp
+      operationId: stepUpAuthentication
       tags: [Identity]
-      summary: Grant five minutes of Step-up Authentication after password confirmation
+      summary: Issue a short-lived grant after proof required by the local TOTP policy
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [password]
-              properties:
-                password:
-                  type: string
+              $ref: "#/components/schemas/FullMFARequest"
       responses:
         "200":
-          description: Step-up Grant issued
+          description: Session-bound Step-up Grant issued
           content:
             application/json:
               schema:
@@ -286,14 +364,14 @@ paths:
     post:
       operationId: changePassword
       tags: [Identity]
-      summary: Change password after current password and TOTP confirmation
+      summary: Change password after current password and TOTP when the local policy requires it
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [current_password, new_password, totp_code]
+              required: [current_password, new_password]
               properties:
                 current_password:
                   type: string
@@ -316,6 +394,147 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/oidc/status:
+    get:
+      operationId: getOIDCStatus
+      tags: [Identity]
+      summary: Minimal anonymous OIDC availability and binding state
+      security: []
+      responses:
+        "200":
+          description: OIDC availability without operational diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCPublicStatus"
+  /api/v1/auth/oidc/login:
+    get:
+      operationId: startOIDCLogin
+      tags: [Identity]
+      summary: Start an anonymous OIDC authorization-code transaction
+      security: []
+      parameters:
+        - name: return_to
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to the discovered Provider authorization endpoint
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+            Set-Cookie:
+              description: Short-lived autosecrets_oidc_state cookie
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/auth/oidc/callback:
+    get:
+      operationId: completeOIDCTransaction
+      tags: [Identity]
+      summary: Validate the authorization response and complete login or binding
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: OIDC transaction completed and redirected to a validated local path
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              description: Expired state cookie and, for login, the AutoSecrets Session
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/security:
+    get:
+      operationId: getAuthenticationSecurity
+      tags: [Identity]
+      summary: Authenticated local TOTP policy and OIDC binding/configuration state
+      responses:
+        "200":
+          description: Sanitized authentication security state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthenticationSecurity"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/oidc/binding:
+    post:
+      operationId: startOIDCBinding
+      tags: [Identity]
+      summary: Re-authenticate locally and start an External Identity Binding transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCBindingProof"
+      responses:
+        "200":
+          description: Provider authorization URL for the binding transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorization_url]
+                properties:
+                  authorization_url:
+                    type: string
+                    format: uri
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: deleteOIDCBinding
+      tags: [Identity]
+      summary: Re-authenticate locally and remove the External Identity Binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCBindingProof"
+      responses:
+        "200":
+          description: External Identity Binding removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bound]
+                properties:
+                  bound:
+                    type: boolean
+                    enum: [false]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/auth/logout:
     post:
       operationId: logout
@@ -444,7 +663,8 @@ paths:
                 protection:
                   type: string
                   enum: [standard, protected]
-                  description: Explicit classification; never inferred from the name
+                  description: >-
+                    Explicit classification; never inferred from the name
                   maxLength: 64
       responses:
         "403":
@@ -574,7 +794,9 @@ paths:
               properties:
                 path:
                   type: string
-                  description: Relative POSIX path; rejects absolute, '.', '..', control chars
+                  description: >-
+                    Relative POSIX path; rejects
+                    absolute, '.', '..', control chars
                 uid:
                   type: integer
                   format: int64
@@ -649,7 +871,8 @@ paths:
               properties:
                 selections:
                   type: object
-                  description: Secret ID to Secret Version sequence (full replacement map)
+                  description: >-
+                    Secret ID to Secret Version sequence (full replacement map)
                   additionalProperties:
                     type: integer
                     format: int64
@@ -677,7 +900,9 @@ paths:
     post:
       operationId: publish
       tags: [Authoring]
-      summary: Freeze the Draft into an immutable Bundle Revision with an Operation Reason
+      summary: >-
+        Freeze the Draft into an immutable Bundle Revision with an Operation
+        Reason
       parameters:
         - $ref: "#/components/parameters/AppID"
         - $ref: "#/components/parameters/EnvID"
@@ -870,7 +1095,8 @@ paths:
     post:
       operationId: createAssignment
       tags: [Fleet]
-      summary: Assign a Secret Bundle to a Node Group (follows the Desired Revision)
+      summary: >-
+        Assign a Secret Bundle to a Node Group (follows the Desired Revision)
       requestBody:
         required: true
         content:
@@ -975,7 +1201,9 @@ paths:
     post:
       operationId: abandonCleanup
       tags: [Fleet]
-      summary: Stop waiting for unreachable nodes; records cleanup_unconfirmed per node
+      summary: >-
+        Stop waiting for unreachable nodes; records cleanup_unconfirmed per
+        node
       parameters:
         - $ref: "#/components/parameters/AssignmentID"
       requestBody:
@@ -990,7 +1218,8 @@ paths:
                   $ref: "#/components/schemas/OperationReason"
       responses:
         "200":
-          description: Control-plane waiting ended with unconfirmed local cleanup
+          description: >-
+            Control-plane waiting ended with unconfirmed local cleanup
           content:
             application/json:
               schema:
@@ -1030,7 +1259,8 @@ paths:
     put:
       operationId: putActivationPolicy
       tags: [Fleet]
-      summary: Define the ordered 1-5 unit list and bounded action for an Environment
+      summary: >-
+        Define the ordered 1-5 unit list and bounded action for an Environment
       parameters:
         - $ref: "#/components/parameters/AppID"
         - $ref: "#/components/parameters/EnvID"
@@ -1098,7 +1328,8 @@ paths:
     post:
       operationId: createInstallCommand
       tags: [Fleet]
-      summary: Issue a ten-minute single-use Enrollment Token and Install Command
+      summary: >-
+        Issue a ten-minute single-use Enrollment Token and Install Command
       requestBody:
         content:
           application/json:
@@ -1108,7 +1339,8 @@ paths:
                 name:
                   type: string
                   maxLength: 64
-                  description: Optional node name; a random one is generated when absent
+                  description: >-
+                    Optional node name; a random one is generated when absent
                 bundle_dir:
                   type: string
                   description: |
@@ -1206,7 +1438,9 @@ paths:
     get:
       operationId: search
       tags: [Fleet]
-      summary: Global search across Applications, Environments, Nodes, and Node Groups
+      summary: >-
+        Global search across Applications, Environments, Nodes, and Node
+        Groups
       parameters:
         - name: q
           in: query
@@ -1293,7 +1527,9 @@ components:
       type: apiKey
       in: header
       name: X-CSRF-Token
-      description: Required on every non-GET request (double-submit token from /auth/login or /me)
+      description: >-
+        Required on every non-GET request (double-submit token from
+        /auth/login or /me)
   responses:
     BadRequest:
       description: Request payload or validation failure
@@ -1332,7 +1568,20 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     Unavailable:
-      description: Dependency or configuration missing (e.g. install flow disabled)
+      description: >-
+        Dependency or configuration missing (e.g. install flow disabled)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    RateLimited:
+      description: Authentication attempt rate limit exceeded
+      headers:
+        Retry-After:
+          description: Seconds until the current failure window expires
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:
@@ -1358,7 +1607,7 @@ components:
           type: string
     BootstrapResponse:
       type: object
-      required: [id, username, status, enrollment_token, totp_uri]
+      required: [id, username, status, csrf_token, role, expires_at]
       properties:
         id:
           type: string
@@ -1366,11 +1615,77 @@ components:
           type: string
         status:
           type: string
-          enum: [pending_mfa]
+          enum: [active]
+        csrf_token:
+          type: string
+        role:
+          type: string
+          enum: [administrator]
+        expires_at:
+          type: string
+          format: date-time
+    SecondFactorRequired:
+      type: object
+      required: [status, code]
+      properties:
+        status:
+          type: string
+          enum: [second_factor_required]
+        code:
+          type: string
+          enum: [second_factor_required]
+    TOTPEnrollmentStarted:
+      type: object
+      required: [username, enrollment_token, totp_uri]
+      properties:
+        username:
+          type: string
         enrollment_token:
           type: string
         totp_uri:
           type: string
+    OIDCPublicStatus:
+      type: object
+      required: [available, bound, login_available]
+      properties:
+        available:
+          type: boolean
+        bound:
+          type: boolean
+        login_available:
+          type: boolean
+    OIDCBindingProof:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+        totp_code:
+          type: string
+          pattern: "^[0-9]{6}$"
+        return_to:
+          type: string
+    AuthenticationSecurity:
+      type: object
+      required: [totp_login_required, oidc]
+      properties:
+        totp_login_required:
+          type: boolean
+        oidc:
+          type: object
+          required: [available, bound]
+          properties:
+            available:
+              type: boolean
+            bound:
+              type: boolean
+            issuer:
+              type: string
+              format: uri
+            display_name:
+              type: string
+            configuration_error:
+              type: string
     LoginResponse:
       type: object
       required: [csrf_token, username, id, role, expires_at]
@@ -1428,7 +1743,15 @@ components:
           enum: [true]
     Me:
       type: object
-      required: [bootstrap_required, organization, member, csrf_token, session_expires_at, idle_expires_at, step_up]
+      required:
+        - bootstrap_required
+        - organization
+        - member
+        - csrf_token
+        - session_expires_at
+        - idle_expires_at
+        - totp_login_required
+        - auth_method
       properties:
         bootstrap_required:
           type: boolean
@@ -1458,8 +1781,11 @@ components:
         idle_expires_at:
           type: string
           format: date-time
-        step_up:
+        totp_login_required:
           type: boolean
+        auth_method:
+          type: string
+          enum: [local, oidc]
     Application:
       type: object
       required: [id, name, created_at]
@@ -1542,7 +1868,13 @@ components:
             $ref: "#/components/schemas/DraftSelection"
     Revision:
       type: object
-      required: [id, draft_version, file_count, created_by, created_at, operation_reason]
+      required:
+        - id
+        - draft_version
+        - file_count
+        - created_by
+        - created_at
+        - operation_reason
       properties:
         id:
           type: string
@@ -1565,7 +1897,12 @@ components:
       properties:
         category:
           type: string
-          enum: [maintenance, incident_response, access_change, configuration_correction, other]
+          enum:
+            - maintenance
+            - incident_response
+            - access_change
+            - configuration_correction
+            - other
         explanation:
           type: string
           maxLength: 500
@@ -1586,7 +1923,15 @@ components:
             type: string
     Assignment:
       type: object
-      required: [id, group_id, group_name, application_id, environment_id, revision_id, status, created_at]
+      required:
+        - id
+        - group_id
+        - group_name
+        - application_id
+        - environment_id
+        - revision_id
+        - status
+        - created_at
       properties:
         id:
           type: string
@@ -1600,7 +1945,8 @@ components:
           type: string
         revision_id:
           type: string
-          description: Current Desired Revision, advanced by Publish and Rollback
+          description: >-
+            Current Desired Revision, advanced by Publish and Rollback
         status:
           type: string
           enum: [active, removing]
@@ -1637,7 +1983,17 @@ components:
           enum: [none, reload, restart]
     Node:
       type: object
-      required: [id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result, state, unassigned]
+      required:
+        - id
+        - name
+        - serial
+        - created_at
+        - last_seen_at
+        - desired_etag
+        - observed_revision
+        - last_result
+        - state
+        - unassigned
       properties:
         id:
           type: string
@@ -1666,14 +2022,26 @@ components:
           type: boolean
     Overview:
       type: object
-      required: [generated_at, counts, attention, recent_publishes, recent_audit]
+      required:
+        - generated_at
+        - counts
+        - attention
+        - recent_publishes
+        - recent_audit
       properties:
         generated_at:
           type: string
           format: date-time
         counts:
           type: object
-          required: [applications, environments, secrets, nodes, node_groups, assignments, audit_events]
+          required:
+            - applications
+            - environments
+            - secrets
+            - nodes
+            - node_groups
+            - assignments
+            - audit_events
           properties:
             applications:
               type: integer
@@ -1697,7 +2065,13 @@ components:
             properties:
               kind:
                 type: string
-                enum: [failed_convergence, offline_node, unassigned_node, unclassified_environment, cleanup_failed, cleanup_unconfirmed]
+                enum:
+                  - failed_convergence
+                  - offline_node
+                  - unassigned_node
+                  - unclassified_environment
+                  - cleanup_failed
+                  - cleanup_unconfirmed
               count:
                 type: integer
               resource:
@@ -1716,7 +2090,8 @@ components:
       properties:
         command:
           type: string
-          description: curl | sudo bash Install Command carrying the one-time Token
+          description: >-
+            curl | sudo bash Install Command carrying the one-time Token
         expires_at:
           type: string
           format: date-time
@@ -1760,7 +2135,8 @@ components:
           type: string
         actor_display:
           type: string
-          description: Event-time display snapshot; renames never rewrite history
+          description: >-
+            Event-time display snapshot; renames never rewrite history
         resource_type:
           type: string
         resource_id:
@@ -1845,7 +2221,8 @@ components:
             - duplicate
             - internal
             - unavailable
-            - step_up_required
             - payload_too_large
-            - activation_policy_required
             - mfa_enrollment_required
+            - second_factor_required
+            - challenge_expired
+            - rate_limited

@@ -16,6 +16,13 @@ import (
 	"filippo.io/age"
 )
 
+// desiredResponse mirrors the fleet desired-state response shape the test
+// unmarshals; the concrete type lives in the fleet package.
+type desiredResponse struct {
+	ETag      string               `json:"etag"`
+	Envelopes []*envelope.Envelope `json:"envelopes"`
+}
+
 // --- Desired State delivery -----------------------------------------------
 
 func (ta *testApp) pollDesired(t *testing.T, node nodeIdentity, etag string) (int, desiredResponse) {

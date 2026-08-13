@@ -4,16 +4,16 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useSecrets } from "../../hooks/applications/use-secrets";
 import { useCreateSecret } from "../../hooks/applications/use-create-secret";
 import { secretSchema, type SecretForm } from "../../lib/constants/schemas";
-import { BindingRow } from "./binding-row";
+import { SecretTableRow } from "./binding-row";
 import { Skeleton } from "../../components/ui/skeleton";
-import { UpdateValueButton } from "./update-value-button";
 import { DraftPanel } from "./draft-panel";
 import { RevisionsPanel } from "./revisions-panel";
 import { ErrorBoundary } from "../../components/error-boundary";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { Frame } from "../../components/ui/frame";
+import { Tabs, TabsContent, TabsList, TabsTab } from "../../components/ui/tabs";
 import {
   Dialog, DialogClose, DialogDescription, DialogFooter,
   DialogHeader, DialogPanel, DialogPopup, DialogTitle, DialogTrigger,
@@ -82,36 +82,35 @@ export function SecretEditor({ appId, envId }: SecretEditorProps) {
           <TableHeader>
             <TableRow className="border-b opacity-60">
               <TableHead className="p-2">名称</TableHead>
-              <TableHead className="p-2">Binding</TableHead>
-              <TableHead className="p-2">Version</TableHead>
-              <TableHead className="p-2">操作</TableHead>
+              <TableHead className="p-2">绑定路径</TableHead>
+              <TableHead className="p-2">版本</TableHead>
+              <TableHead className="p-2 text-right">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {secrets.data?.map((s) => (
-              <TableRow key={s.id} className="border-b">
-                <TableCell className="p-2 font-mono">{s.name}</TableCell>
-                <TableCell className="p-2">
-                  <BindingRow secret={s} appId={appId} envId={envId} />
-                </TableCell>
-                <TableCell className="p-2">
-                  {s.selected_version}/{s.latest_version}
-                </TableCell>
-                <TableCell className="p-2">
-                  <UpdateValueButton secret={s} appId={appId} envId={envId} />
-                </TableCell>
-              </TableRow>
+              <SecretTableRow key={s.id} secret={s} appId={appId} envId={envId} />
             ))}
           </TableBody>
         </Table>
       </Frame>
 
-      <ErrorBoundary>
-        <DraftPanel appId={appId} envId={envId} />
-      </ErrorBoundary>
-      <ErrorBoundary>
-        <RevisionsPanel appId={appId} envId={envId} />
-      </ErrorBoundary>
+      <Tabs defaultValue="draft">
+        <TabsList>
+          <TabsTab value="draft">待发布内容</TabsTab>
+          <TabsTab value="revisions">版本历史</TabsTab>
+        </TabsList>
+        <TabsContent value="draft" className="pt-2">
+          <ErrorBoundary>
+            <DraftPanel appId={appId} envId={envId} />
+          </ErrorBoundary>
+        </TabsContent>
+        <TabsContent value="revisions" className="pt-2">
+          <ErrorBoundary>
+            <RevisionsPanel appId={appId} envId={envId} />
+          </ErrorBoundary>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

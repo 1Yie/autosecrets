@@ -5,8 +5,6 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"autosecrets.dev/core/internal/crypto"
 )
 
 // TestPerAssignmentConvergenceAndNodeState locks ADR-0015: activation
@@ -94,39 +92,27 @@ func nodeState(t *testing.T, res result) string {
 // TestRecoveryCodeSingleUse locks the one-time property of Recovery Codes.
 func TestRecoveryCodeSingleUse(t *testing.T) {
 	ta := newTestApp(t)
-	code, err := ta.app.EmitBootstrapCode(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := ta.do(t, "POST", "/api/v1/bootstrap", map[string]string{
-		"code": code, "organization_name": "Acme", "username": "admin",
-		"password": "correct-horse-battery-42",
-	}, "", "")
-	if started.status != http.StatusCreated {
-		t.Fatalf("bootstrap: %d %s", started.status, started.raw)
-	}
-	secret := totpSecretFromURI(t, started.body["totp_uri"].(string))
-	totp, err := crypto.TOTPCode(secret, ta.app.now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	verified := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/verify", map[string]string{
-		"enrollment_token": started.body["enrollment_token"].(string), "totp_code": totp,
-	}, "", "")
-	recovery := verified.body["recovery_codes"].([]any)[0].(string)
-	ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/confirm", map[string]string{
-		"confirmation_token": verified.body["confirmation_token"].(string),
-	}, "", "")
+	cookie, csrf := ta.bootstrap(t)
+	_, recoveryCodes := ta.enableTOTP(t, cookie, csrf, "correct-horse-42")
+	recovery := recoveryCodes[0].(string)
 
-	login := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
-		"username": "admin", "password": "correct-horse-battery-42", "recovery_code": recovery,
+	passwordStep := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "admin", "password": "correct-horse-42",
 	}, "", "")
+	challengeCookie := cookieValueFrom(t, passwordStep, "autosecrets_login_challenge")
+	login := ta.doH(t, "POST", "/api/v1/auth/login/second-factor", map[string]string{
+		"recovery_code": recovery,
+	}, map[string]string{"Cookie": "autosecrets_login_challenge=" + challengeCookie})
 	if login.status != http.StatusOK {
 		t.Fatalf("recovery code login: %d %s", login.status, login.raw)
 	}
-	replay := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
-		"username": "admin", "password": "correct-horse-battery-42", "recovery_code": recovery,
+	passwordStep = ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "admin", "password": "correct-horse-42",
 	}, "", "")
+	challengeCookie = cookieValueFrom(t, passwordStep, "autosecrets_login_challenge")
+	replay := ta.doH(t, "POST", "/api/v1/auth/login/second-factor", map[string]string{
+		"recovery_code": recovery,
+	}, map[string]string{"Cookie": "autosecrets_login_challenge=" + challengeCookie})
 	if replay.status != http.StatusUnauthorized {
 		t.Fatalf("recovery code replay must be rejected: %d %s", replay.status, replay.raw)
 	}

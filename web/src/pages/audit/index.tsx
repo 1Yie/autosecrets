@@ -75,7 +75,7 @@ export function AuditPage() {
             </SelectContent>
           </Select>
         </label>
-        <Button variant="default" size="sm" type="submit">
+        <Button variant="default" type="submit">
           应用筛选
         </Button>
       </form>

@@ -1,15 +1,19 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { BootstrapPage } from "../../../pages/bootstrap";
+import { useSessionStore } from "../../../stores/session-store";
 
 describe("BootstrapPage", () => {
   it("requires code, organization name, username, and a 12+ char password", async () => {
     const qc = new QueryClient();
     render(
       <QueryClientProvider client={qc}>
-        <BootstrapPage />
+        <MemoryRouter>
+          <BootstrapPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
     const button = screen.getByRole("button", { name: "创建管理员" });
@@ -27,11 +31,14 @@ describe("BootstrapPage", () => {
     expect(button).toBeEnabled();
   });
 
-  it("walks the MFA wizard after enrollment", async () => {
+  it("activates the Administrator and stores the new Session without an MFA wizard", async () => {
+	useSessionStore.getState().clearSession();
     const qc = new QueryClient();
     render(
       <QueryClientProvider client={qc}>
-        <BootstrapPage />
+        <MemoryRouter>
+          <BootstrapPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
     const user = userEvent.setup();
@@ -41,15 +48,15 @@ describe("BootstrapPage", () => {
     await user.type(screen.getByTestId("password"), "correct-horse-42");
     await user.click(screen.getByRole("button", { name: "创建管理员" }));
 
-    expect(await screen.findByText("验证动态验证码")).toBeVisible();
-    await user.type(screen.getByTestId("totp-code"), "123456");
-    await user.click(screen.getByRole("button", { name: "验证" }));
-
-    expect(await screen.findByText("保存恢复码")).toBeVisible();
-    expect(screen.getByTestId("recovery-codes").textContent).toContain("ABCD-EFGH-JKLM");
-    await user.click(screen.getByTestId("recovery-ack"));
-    await user.click(screen.getByRole("button", { name: "完成注册" }));
-
-    expect(await screen.findByText("注册完成")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "初始化 AutoSecrets" })).toBeVisible();
+    expect(useSessionStore.getState().csrfToken).toBe("csrf-test-token");
+    expect(qc.getQueryData(["me"])).toMatchObject({
+      bootstrap_required: false,
+      organization: { display_name: "Acme" },
+      member: { username: "admin", role: "administrator" },
+      totp_login_required: false,
+      auth_method: "local",
+    });
+    expect(screen.queryByText("验证动态验证码")).toBeNull();
   });
 });

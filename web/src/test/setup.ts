@@ -17,6 +17,12 @@ if (typeof document.elementFromPoint !== "function") {
   document.elementFromPoint = () => null;
 }
 
+// Base UI ScrollArea calls Element.getAnimations() to detect scroll-fade;
+// jsdom does not implement the Web Animations API.
+if (typeof Element.prototype.getAnimations !== "function") {
+  Element.prototype.getAnimations = () => [];
+}
+
 afterEach(() => cleanup());
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));

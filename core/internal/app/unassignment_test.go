@@ -7,19 +7,20 @@ import (
 	"time"
 )
 
-// TestActivationPolicyRequiredBeforeAssignment locks ADR-0022: an
-// Environment must define an ordered Activation Policy before its first
-// Assignment; every delivered Bundle can then be stopped safely.
-func TestActivationPolicyRequiredBeforeAssignment(t *testing.T) {
+// TestAssignmentWithoutActivationPolicy locks the 2026-08 product decision:
+// an Environment may receive its first Assignment without any Activation
+// Policy (cleanup then removes files only, with no systemd actions). The
+// policy endpoints stay available for operators who want service actions.
+func TestAssignmentWithoutActivationPolicy(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
 	ta.createSecret(t, a, "db_pass", "v1")
 	ta.publish(t, a)
 	g := ta.do(t, "POST", "/api/v1/node-groups", map[string]string{"name": "g1"}, a.cookie, a.csrf)
 
-	blocked := ta.do(t, "POST", "/api/v1/assignments", assignBody(a, g.body["id"].(string)), a.cookie, a.csrf)
-	if blocked.status != http.StatusBadRequest || blocked.body["code"] != "activation_policy_required" {
-		t.Fatalf("assignment without activation policy must be rejected: %d %s", blocked.status, blocked.raw)
+	asg := ta.do(t, "POST", "/api/v1/assignments", assignBody(a, g.body["id"].(string)), a.cookie, a.csrf)
+	if asg.status != http.StatusCreated {
+		t.Fatalf("assignment without activation policy must succeed: %d %s", asg.status, asg.raw)
 	}
 	badUnits := ta.do(t, "PUT", policyPath(a),
 		map[string]any{
@@ -38,18 +39,6 @@ func TestActivationPolicyRequiredBeforeAssignment(t *testing.T) {
 		}, a.cookie, a.csrf)
 	if badAction.status != http.StatusBadRequest {
 		t.Fatalf("arbitrary action must be rejected: %d %s", badAction.status, badAction.raw)
-	}
-	okPolicy := ta.do(t, "PUT", policyPath(a),
-		map[string]any{
-			"units":  []string{"web.service", "web.socket"},
-			"action": "restart",
-		}, a.cookie, a.csrf)
-	if okPolicy.status != http.StatusOK {
-		t.Fatalf("activation policy: %d %s", okPolicy.status, okPolicy.raw)
-	}
-	asg := ta.do(t, "POST", "/api/v1/assignments", assignBody(a, g.body["id"].(string)), a.cookie, a.csrf)
-	if asg.status != http.StatusCreated {
-		t.Fatalf("assignment after policy: %d %s", asg.status, asg.raw)
 	}
 }
 

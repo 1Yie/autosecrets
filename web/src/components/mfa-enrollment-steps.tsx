@@ -16,8 +16,7 @@ export interface EnrollmentContext {
   totp_uri: string;
 }
 
-/** Shared TOTP verify -> one-time Recovery Code confirmation flow, used by
- * Bootstrap and by the legacy-member enrollment resume on the login page. */
+/** TOTP verify -> one-time Recovery Code confirmation flow. */
 export function MFAEnrollmentSteps({
   enrollment,
   onDone,

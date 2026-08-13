@@ -72,6 +72,33 @@ def _parse_mode(mode: str) -> int:
         raise MaterializeError(f"invalid mode: {mode!r}") from None
 
 
+def _ensure_dir(bundle_root: Path, path: Path) -> None:
+    """Create real directories below the bundle root.
+
+    Existing files and symlinks are replaced so a local symlink cannot redirect
+    a signed relative binding outside the configured Materialized Bundle.
+    """
+    current = bundle_root
+    for part in path.relative_to(bundle_root).parts:
+        current /= part
+        if current.is_symlink() or (current.exists() and not current.is_dir()):
+            current.unlink()
+        current.mkdir(exist_ok=True)
+
+
+def _manifest_target(bundle_root: Path, rel: str) -> Path | None:
+    """Resolve a manifest path only while every parent remains a real directory."""
+    validate_path(rel)
+    parts = Path(rel).parts
+    current = bundle_root
+    for part in parts[:-1]:
+        current /= part
+        if current.is_symlink() or not current.is_dir():
+            return None
+    target = current / parts[-1]
+    return None if target.is_symlink() else target
+
+
 def materialize(bundle_root: Path, files: list[PayloadFile]) -> None:
     """Writes files flat under bundle_root with per-file atomic replace,
     then verifies content hashes. On failure the error propagates and the
@@ -90,7 +117,7 @@ def materialize(bundle_root: Path, files: list[PayloadFile]) -> None:
     # overwrites them, and pre-existing files are never touched.
     for f in files:
         dest = bundle_root / f.path
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_dir(bundle_root, dest.parent)
         fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".write-")
         try:
             with os.fdopen(fd, "wb") as fh:
@@ -130,12 +157,14 @@ def remove_manifest_files(identity_dir: Path, bundle_root: Path,
     manifest = json.loads(path.read_text(encoding="utf-8"))
     removed = 0
     for entry in manifest:
-        target = bundle_root / entry["path"]
         try:
+            target = _manifest_target(bundle_root, entry["path"])
+            if target is None:
+                continue
             if target.is_file() and sha256_hex(target.read_bytes()) == entry["sha256"]:
                 target.unlink()
                 removed += 1
-        except OSError:
+        except (MaterializeError, OSError):
             # A file the Agent no longer controls is not a cleanup failure
             # the control plane can resolve; keep going.
             continue

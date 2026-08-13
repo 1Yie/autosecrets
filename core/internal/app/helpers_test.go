@@ -19,18 +19,22 @@ import (
 	"time"
 
 	"autosecrets.dev/core/internal/crypto"
-	"autosecrets.dev/core/internal/store"
+	"autosecrets.dev/core/internal/database"
 	"autosecrets.dev/core/internal/testutil"
 )
 
 func sessionCookieFrom(t *testing.T, response result) string {
+	return cookieValueFrom(t, response, sessionCookie)
+}
+
+func cookieValueFrom(t *testing.T, response result, name string) string {
 	t.Helper()
 	for _, value := range response.header.Values("Set-Cookie") {
-		if strings.HasPrefix(value, sessionCookie+"=") {
-			return strings.SplitN(strings.TrimPrefix(value, sessionCookie+"="), ";", 2)[0]
+		if strings.HasPrefix(value, name+"=") {
+			return strings.SplitN(strings.TrimPrefix(value, name+"="), ";", 2)[0]
 		}
 	}
-	t.Fatalf("no %s cookie in response headers", sessionCookie)
+	t.Fatalf("no %s cookie in response headers", name)
 	return ""
 }
 
@@ -50,7 +54,7 @@ func totpSecretFromURI(t *testing.T, raw string) string {
 type testApp struct {
 	app      *App
 	server   *httptest.Server
-	store    *store.Store
+	store    *database.Store
 	client   *http.Client
 	signer   *crypto.Signer
 	ca       *crypto.CA
@@ -137,9 +141,8 @@ func (ta *testApp) doH(t *testing.T, method, path string, body any, headers map[
 	return out
 }
 
-// bootstrap performs the complete first-member enrollment (including TOTP and
-// Recovery Code confirmation) followed by MFA login. Domain tests therefore
-// never bypass the product identity boundary they depend on.
+// bootstrap creates the single Administrator and returns the Session issued
+// by Bootstrap. New Organizations use password-only local login by default.
 func (ta *testApp) bootstrap(t *testing.T) (cookie, csrf string) {
 	t.Helper()
 	code, err := ta.app.EmitBootstrapCode(context.Background())
@@ -153,34 +156,41 @@ func (ta *testApp) bootstrap(t *testing.T) (cookie, csrf string) {
 	if res.status != http.StatusCreated {
 		t.Fatalf("bootstrap: %d %s", res.status, res.raw)
 	}
-	totpCode, err := crypto.TOTPCode(totpSecretFromURI(t, res.body["totp_uri"].(string)), ta.app.now())
-	if err != nil {
-		t.Fatalf("create test TOTP code: %v", err)
-	}
-	verified := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/verify", map[string]string{
-		"enrollment_token": res.body["enrollment_token"].(string), "totp_code": totpCode,
-	}, "", "")
-	if verified.status != http.StatusOK {
-		t.Fatalf("verify MFA enrollment: %d %s", verified.status, verified.raw)
-	}
-	confirmed := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/confirm", map[string]string{
-		"confirmation_token": verified.body["confirmation_token"].(string),
-	}, "", "")
-	if confirmed.status != http.StatusOK {
-		t.Fatalf("confirm MFA enrollment: %d %s", confirmed.status, confirmed.raw)
-	}
-	login := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
-		"username": "admin", "password": "correct-horse-42", "totp_code": totpCode,
-	}, "", "")
-	if login.status != http.StatusOK {
-		t.Fatalf("login: %d %s", login.status, login.raw)
-	}
-	cookie = sessionCookieFrom(t, login)
-	csrf, _ = login.body["csrf_token"].(string)
+	cookie = sessionCookieFrom(t, res)
+	csrf, _ = res.body["csrf_token"].(string)
 	if csrf == "" {
 		t.Fatal("no csrf token")
 	}
 	return cookie, csrf
+}
+
+func (ta *testApp) enableTOTP(t *testing.T, cookie, csrf, password string) (secret string, recoveryCodes []any) {
+	t.Helper()
+	started := ta.do(t, "POST", "/api/v1/auth/totp/enrollment", map[string]string{
+		"password": password,
+	}, cookie, csrf)
+	if started.status != http.StatusCreated {
+		t.Fatalf("start TOTP enrollment: %d %s", started.status, started.raw)
+	}
+	secret = totpSecretFromURI(t, started.body["totp_uri"].(string))
+	code, err := crypto.TOTPCode(secret, ta.app.now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/verify", map[string]string{
+		"enrollment_token": started.body["enrollment_token"].(string), "totp_code": code,
+	}, cookie, csrf)
+	if verified.status != http.StatusOK {
+		t.Fatalf("verify TOTP enrollment: %d %s", verified.status, verified.raw)
+	}
+	recoveryCodes, _ = verified.body["recovery_codes"].([]any)
+	confirmed := ta.do(t, "POST", "/api/v1/auth/mfa-enrollment/confirm", map[string]string{
+		"confirmation_token": verified.body["confirmation_token"].(string),
+	}, cookie, csrf)
+	if confirmed.status != http.StatusOK {
+		t.Fatalf("confirm TOTP enrollment: %d %s", confirmed.status, confirmed.raw)
+	}
+	return secret, recoveryCodes
 }
 
 // authoringSetup creates an Application and Environment and returns the ids

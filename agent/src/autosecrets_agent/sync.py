@@ -82,12 +82,14 @@ def _process_cleanup(config: AgentConfig, identity, api: AgentAPI,
             if shutil.which("systemctl") and not os.environ.get("AUTOSECRETS_NO_SYSTEMD"):
                 for unit in reversed(instruction.get("units") or []):
                     stop = subprocess.run(["systemctl", "stop", unit],
-                                          capture_output=True, timeout=60)
+                                          capture_output=True, timeout=60,
+                                          check=False)
                     if stop.returncode != 0:
                         # A declared-but-absent or already-inactive unit must
                         # not block cleanup; only an actually running unit does.
                         active = subprocess.run(["systemctl", "is-active", unit],
-                                                capture_output=True, text=True, timeout=30)
+                                                capture_output=True, text=True, timeout=30,
+                                                check=False)
                         if active.stdout.strip() in ("active", "activating", "reloading"):
                             raise RuntimeError(
                                 f"unit {unit} is still {active.stdout.strip()}: "
@@ -99,8 +101,9 @@ def _process_cleanup(config: AgentConfig, identity, api: AgentAPI,
             log.error("cleanup failed for %s: %s", assignment_id, e)
             try:
                 api.cleanup(identity.node_id, assignment_id, "failed", str(e)[:500])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as report_error:  # noqa: BLE001
+                log.warning("failed to report cleanup failure for %s: %s",
+                            assignment_id, report_error)
 
 
 def sync_once(config: AgentConfig) -> dict:
