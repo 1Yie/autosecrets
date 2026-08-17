@@ -1,6 +1,7 @@
 // Transport layer: the only place that touches fetch. Components and Hooks
 // go through TanStack Query wrappers; the CSRF token lives in the Zustand
 // session store and is attached to every mutation.
+import { apiURL, API_BASE } from "./env";
 import { useSessionStore } from "../stores/session-store";
 
 export class ApiError extends Error {
@@ -24,10 +25,10 @@ export async function api<T = unknown>(
     const csrfToken = useSessionStore.getState().csrfToken;
     if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
   }
-  const res = await fetch(path, {
+  const res = await fetch(apiURL(path), {
     method,
     headers,
-    credentials: "same-origin",
+    credentials: API_BASE ? "include" : "same-origin",
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (res.status === 204) return undefined as T;

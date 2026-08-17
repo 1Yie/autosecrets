@@ -32,6 +32,7 @@ type Options struct {
 	ArtifactDir    string
 	TrustedProxy   []*net.IPNet
 	CertHeader     string
+	CORSOrigins    []string
 	// OfflineAfter is the heartbeat threshold after which Core projects a
 	// Managed Node as offline (ADR-0015). Defaults to 75 seconds.
 	OfflineAfter time.Duration
@@ -140,7 +141,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 	})
-	return a.withRequestLog(mux)
+	return a.withRequestLog(middleware.CORS(a.cfg.CORSOrigins)(mux))
 }
 
 func (a *App) agentAuth(next http.Handler) http.Handler {

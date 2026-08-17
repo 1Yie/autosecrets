@@ -77,8 +77,18 @@ cd deploy
 export AUTOSECRETS_DB_PASSWORD='a-long-random-password'
 export CORE_PUBLIC_URL='https://autosecrets.example'
 export CORE_PUBLIC_AGENT_URL='https://agent.autosecrets.example'
+export VITE_API_BASE='https://autosecrets.example'
 docker compose up -d --build
 ```
+
+When the console origin differs from Core (for example `:18081` talking to `:18080`), set both:
+
+```bash
+export VITE_API_BASE='http://154.222.24.116:18080'
+export CORE_CORS_ORIGINS='http://154.222.24.116:18081'
+```
+
+`CORE_CORS_ORIGINS` is a comma-separated list of canonical origins. Leave it empty when a reverse proxy keeps the console and API same-origin.
 
 Set `SOURCE_COMMIT` if you want the About dialog to show a specific revision. Core writes keys into the `keys` volume; back that volume up separately from the database.
 

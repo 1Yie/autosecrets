@@ -7,7 +7,10 @@ import (
 )
 
 func TestFromEnvDefaults(t *testing.T) {
-	for _, key := range []string{"CORE_LISTEN_ADDR", "CORE_MANAGEMENT_BASE", "CORE_AGENT_BASE", "CORE_TRUSTED_PROXY_CIDRS", "CORE_PROXY_CERT_HEADER"} {
+	for _, key := range []string{
+		"CORE_LISTEN_ADDR", "CORE_MANAGEMENT_BASE", "CORE_AGENT_BASE",
+		"CORE_TRUSTED_PROXY_CIDRS", "CORE_PROXY_CERT_HEADER", "CORE_CORS_ORIGINS",
+	} {
 		t.Setenv(key, "")
 	}
 	cfg, err := FromEnv()
@@ -25,6 +28,9 @@ func TestFromEnvDefaults(t *testing.T) {
 	}
 	if cfg.ProxyCertHeader != "X-Autosecrets-Client-Cert" {
 		t.Fatalf("ProxyCertHeader = %q", cfg.ProxyCertHeader)
+	}
+	if len(cfg.CORSOrigins) != 0 {
+		t.Fatalf("expected no CORS origins by default, got %v", cfg.CORSOrigins)
 	}
 }
 
@@ -66,6 +72,32 @@ func TestParseCIDRsEmpty(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []*net.IPNet{}) {
 		t.Fatalf("got %v", got)
+	}
+}
+
+func TestFromEnvParsesCORSOrigins(t *testing.T) {
+	t.Setenv("CORE_CORS_ORIGINS",
+		"http://154.222.24.116:18081, https://as.ichiyo.in")
+	cfg, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"http://154.222.24.116:18081", "https://as.ichiyo.in"}
+	if !reflect.DeepEqual(cfg.CORSOrigins, want) {
+		t.Fatalf("CORSOrigins = %v, want %v", cfg.CORSOrigins, want)
+	}
+}
+
+func TestFromEnvRejectsInvalidCORSOrigin(t *testing.T) {
+	t.Setenv("CORE_CORS_ORIGINS", "http://example.com/path")
+	if _, err := FromEnv(); err == nil {
+		t.Fatal("origin with path accepted")
+	}
+}
+
+func TestParseOriginsRejectsMissingScheme(t *testing.T) {
+	if _, err := ParseOrigins([]string{"example.com"}); err == nil {
+		t.Fatal("origin without scheme accepted")
 	}
 }
 

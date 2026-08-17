@@ -90,6 +90,7 @@ func main() {
 		InstallCurlOpts:  config.InstallCurlOpts(),
 		TrustedProxy:     cfg.TrustedProxyCIDRs,
 		CertHeader:       cfg.ProxyCertHeader,
+		CORSOrigins:      cfg.CORSOrigins,
 		OIDCClient:       oidcClient,
 		OIDCUnavailable:  oidcUnavailable,
 		OAuthClient:      oauthClient,

@@ -30,6 +30,7 @@ type Config struct {
 	OAuthClientID         string
 	OAuthClientSecret     string
 	OAuthScopes           []string
+	CORSOrigins           []string
 }
 
 const (
@@ -80,6 +81,10 @@ func FromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	origins, err := ParseOrigins(splitCSV(os.Getenv("CORE_CORS_ORIGINS")))
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		ListenAddr:            envOr("CORE_LISTEN_ADDR", defaultListenAddr),
 		ManagementBase:        envOr("CORE_MANAGEMENT_BASE", defaultManagementBase),
@@ -98,6 +103,7 @@ func FromEnv() (Config, error) {
 		OAuthClientID:         os.Getenv("CORE_OAUTH_CLIENT_ID"),
 		OAuthClientSecret:     os.Getenv("CORE_OAUTH_CLIENT_SECRET"),
 		OAuthScopes:           oauthScopes(os.Getenv("CORE_OAUTH_SCOPES")),
+		CORSOrigins:           origins,
 	}, nil
 }
 
@@ -224,6 +230,33 @@ func ParseCIDRs(values []string) ([]*net.IPNet, error) {
 			return nil, fmt.Errorf("invalid trusted proxy CIDR %q: %w", value, err)
 		}
 		result = append(result, network)
+	}
+	return result, nil
+}
+
+// ParseOrigins parses canonical origins (scheme + host[:port], no path).
+func ParseOrigins(values []string) ([]string, error) {
+	result := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" ||
+			parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil, fmt.Errorf("CORS origin %q must be a canonical origin", value)
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return nil, fmt.Errorf("CORS origin %q must use http or https", value)
+		}
+		origin := parsed.Scheme + "://" + parsed.Host
+		if seen[origin] {
+			continue
+		}
+		seen[origin] = true
+		result = append(result, origin)
 	}
 	return result, nil
 }

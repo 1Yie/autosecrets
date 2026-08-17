@@ -38,6 +38,7 @@ services:
         password=${AUTOSECRETS_DB_PASSWORD}
       CORE_PUBLIC_AGENT_URL: ${CORE_PUBLIC_AGENT_URL:-}
       CORE_PUBLIC_URL: ${CORE_PUBLIC_URL:-}
+      CORE_CORS_ORIGINS: ${CORE_CORS_ORIGINS:-}
       CORE_OIDC_ISSUER_URL: ${CORE_OIDC_ISSUER_URL:-}
       CORE_OIDC_CLIENT_ID: ${CORE_OIDC_CLIENT_ID:-}
       CORE_OIDC_CLIENT_SECRET: ${CORE_OIDC_CLIENT_SECRET:-}
@@ -56,6 +57,8 @@ services:
   web:
     build:
       context: ../web
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-}
     restart: unless-stopped
     ports:
       - "${WEB_HOST_PORT:-18081}:80"

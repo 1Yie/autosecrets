@@ -13,6 +13,7 @@ import {
 	type SecondFactorForm,
 } from "../../lib/constants/schemas";
 import { API_PATHS } from "../../lib/constants/api-paths";
+import { apiURL } from "../../lib/env";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Field, FieldError, FieldLabel } from "../../components/ui/field";
@@ -290,7 +291,7 @@ export function LoginPage() {
 							loginLabel="使用 OAuth 登录"
 							available={oauthAvailable}
 							loginAvailable={oauthLoginAvailable}
-							href={`${API_PATHS.oauthLogin}?return_to=/dashboard/overview`}
+							href={apiURL(`${API_PATHS.oauthLogin}?return_to=/dashboard/overview`)}
 						/>
 					)}
 					{oidcAvailable && (
@@ -299,7 +300,7 @@ export function LoginPage() {
 							loginLabel="使用 OpenID Connect 登录"
 							available={oidcAvailable}
 							loginAvailable={oidcLoginAvailable}
-							href={`${API_PATHS.oidcLogin}?return_to=/dashboard/overview`}
+							href={apiURL(`${API_PATHS.oidcLogin}?return_to=/dashboard/overview`)}
 						/>
 					)}
 				</>
