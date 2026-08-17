@@ -30,8 +30,10 @@ services:
       CORE_TRUSTED_PROXY_CIDRS: ${CORE_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       CORE_PROXY_CERT_HEADER: "X-Autosecrets-Client-Cert"
       CORE_KEYS_DIR: "/keys"
-      CORE_DB_DSN: "postgres://autosecrets:${AUTOSECRETS_DB_PASSWORD}@\
-        postgres:5432/autosecrets"
+      CORE_DB_DSN: >-
+        host=postgres port=5432 dbname=autosecrets
+        user=autosecrets
+        password=${AUTOSECRETS_DB_PASSWORD}
       CORE_PUBLIC_AGENT_URL: ${CORE_PUBLIC_AGENT_URL:-}
       CORE_PUBLIC_URL: ${CORE_PUBLIC_URL:-}
       CORE_OIDC_ISSUER_URL: ${CORE_OIDC_ISSUER_URL:-}
