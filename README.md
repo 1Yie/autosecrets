@@ -70,7 +70,7 @@ First boot prints a one-time Bootstrap Code in `.dev/core.log`. Open the Web URL
 
 ## Deploy with Compose
 
-The supported install is the Compose bundle in `deploy/`: Core, PostgreSQL, and Caddy.
+The supported install is the Compose bundle in `deploy/`: Core, PostgreSQL, and Web.
 
 ```bash
 cd deploy
@@ -115,7 +115,7 @@ api/openapi.yaml     Management API contract
 core/                Go service, SQL, migrations
 agent/               Python Agent
 web/                 React console
-deploy/              Compose + Caddy
+deploy/              Compose bundle
 docs/adr/            Architecture decisions
 CONTEXT.md           Shared domain language
 ```
