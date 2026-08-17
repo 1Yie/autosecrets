@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: autosecrets
       POSTGRES_USER: autosecrets
-      POSTGRES_PASSWORD: ${AUTOSECRETS_DB_PASSWORD:?set AUTOSECRETS_DB_PASSWORD in the environment}
+      POSTGRES_PASSWORD: ${AUTOSECRETS_DB_PASSWORD:?set AUTOSECRETS_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -30,7 +30,8 @@ services:
       CORE_TRUSTED_PROXY_CIDRS: ${CORE_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       CORE_PROXY_CERT_HEADER: "X-Autosecrets-Client-Cert"
       CORE_KEYS_DIR: "/keys"
-      CORE_DB_DSN: "postgres://autosecrets:${AUTOSECRETS_DB_PASSWORD:?set AUTOSECRETS_DB_PASSWORD in the environment}@postgres:5432/autosecrets"
+      CORE_DB_DSN: "postgres://autosecrets:${AUTOSECRETS_DB_PASSWORD}@\
+        postgres:5432/autosecrets"
       CORE_PUBLIC_AGENT_URL: ${CORE_PUBLIC_AGENT_URL:-}
       CORE_PUBLIC_URL: ${CORE_PUBLIC_URL:-}
       CORE_OIDC_ISSUER_URL: ${CORE_OIDC_ISSUER_URL:-}
@@ -52,8 +53,8 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
