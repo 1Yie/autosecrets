@@ -49,9 +49,17 @@ services:
       - keys:/keys
       - ${CORE_ARTIFACT_DIR:-./artifacts}:/artifacts:ro
 
+  web:
+    build:
+      context: ../web
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    depends_on:
+      - core
+      - web
     ports:
       - "${CADDY_HTTP_PORT:-80}:80"
       - "${CADDY_HTTPS_PORT:-443}:443"
