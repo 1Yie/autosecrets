@@ -208,7 +208,6 @@ export function SecurityPage() {
           <ExternalProviderCard
             title="OAuth"
             kind="oauth"
-            idPrefix="oauth"
             provider={oauth}
             totpRequired={totpRequired}
             startBinding={startOAuthBinding}
@@ -217,7 +216,6 @@ export function SecurityPage() {
           <ExternalProviderCard
             title="OpenID Connect"
             kind="oidc"
-            idPrefix="oidc"
             provider={oidc}
             totpRequired={totpRequired}
             startBinding={startOIDCBinding}
@@ -251,7 +249,6 @@ export function SecurityPage() {
 function ExternalProviderCard({
   title,
   kind,
-  idPrefix,
   provider,
   totpRequired,
   startBinding,
@@ -259,7 +256,6 @@ function ExternalProviderCard({
 }: {
   title: string;
   kind: "oauth" | "oidc";
-  idPrefix: string;
   provider: ExternalProviderSecurity;
   totpRequired: boolean;
   startBinding: {
@@ -323,7 +319,7 @@ function ExternalProviderCard({
         {provider.available && (
           <div className="mt-4 space-y-4">
             <CredentialProofFields
-              idPrefix={idPrefix}
+              idPrefix={kind}
               value={proof}
               onChange={setProof}
               requireTOTP={totpRequired}
@@ -620,6 +616,8 @@ function ProofOTPField({
   );
 }
 
+type CredentialProofIdPrefix = "local" | "oidc" | "oauth";
+
 function CredentialProofFields({
   idPrefix,
   value,
@@ -627,7 +625,7 @@ function CredentialProofFields({
   requireTOTP,
   passwordLabel,
 }: {
-  idPrefix: "local" | "oidc" | "oauth";
+  idPrefix: CredentialProofIdPrefix;
   value: CredentialProof;
   onChange: (value: CredentialProof) => void;
   requireTOTP: boolean;
