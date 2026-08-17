@@ -9,8 +9,13 @@ RUN CGO_ENABLED=0 go build -trimpath \
 	-o /out/autosecrets-core ./cmd/autosecrets-core
 
 FROM alpine:3.20
-RUN addgroup -S autosecrets && adduser -S -G autosecrets autosecrets
+RUN apk add --no-cache su-exec \
+	&& addgroup -S autosecrets \
+	&& adduser -S -G autosecrets autosecrets \
+	&& mkdir -p /keys \
+	&& chown autosecrets:autosecrets /keys
 COPY --from=build /out/autosecrets-core /usr/local/bin/autosecrets-core
-USER autosecrets
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 EXPOSE 8080
-ENTRYPOINT ["/usr/local/bin/autosecrets-core"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
