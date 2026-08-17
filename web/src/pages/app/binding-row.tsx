@@ -92,7 +92,7 @@ export function SecretTableRow({ secret, appId, envId }: SecretTableRowProps) {
 						>
 							<MoreVertical />
 						</MenuTrigger>
-						<MenuPopup align="end" side="bottom">
+						<MenuPopup align="end" className="w-max min-w-0" side="bottom">
 							<MenuItem closeOnClick onClick={() => setBindingOpen(true)}>
 								编辑绑定
 							</MenuItem>

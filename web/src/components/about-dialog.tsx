@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, GitBranch, Heart, Package, Users } from "lucide-react";
 import { apiGet } from "../lib/api";
 import { API_PATHS } from "../lib/constants/api-paths";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
@@ -30,17 +31,15 @@ function formatVersion(version: string): string {
 	return version;
 }
 
-/**
- * GitHub 贡献者：静态占位数据。
- * 接入真实数据时，替换为拉取 GitHub API：
- *   fetch(`https://api.github.com/repos/${GITHUB_REPO}/contributors`, {
- *     headers: { Accept: "application/vnd.github+json" },
- *   })
- */
 interface Person {
 	name: string;
 	role: string;
 	url?: string;
+	github?: string;
+}
+
+function githubAvatarUrl(username: string): string {
+	return `https://github.com/${username}.png?size=80`;
 }
 
 function PersonList({ people }: { people: Person[] }) {
@@ -51,9 +50,16 @@ function PersonList({ people }: { people: Person[] }) {
 					key={person.name}
 					className="flex items-center gap-3 rounded-lg border p-3"
 				>
-					<span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium">
-						{person.name.slice(0, 1).toUpperCase()}
-					</span>
+					<Avatar className="size-9">
+						{person.github ? (
+							<AvatarImage
+								src={githubAvatarUrl(person.github)}
+								alt={`${person.name} 的头像`}
+								referrerPolicy="no-referrer"
+							/>
+						) : null}
+						<AvatarFallback>{person.name.slice(0, 1).toUpperCase()}</AvatarFallback>
+					</Avatar>
 					<div className="min-w-0">
 						<div className="truncate text-sm font-medium">{person.name}</div>
 						<div className="truncate text-xs text-muted-foreground">
@@ -78,13 +84,13 @@ function PersonList({ people }: { people: Person[] }) {
 }
 
 const REPO_URL = "https://github.com/1Yie/autosecrets";
-const ORIGINAL_REPO_URL = "https://git.kmou424.moe/kmou424/autosecrets";
 
 const CONTRIBUTORS: Person[] = [
 	{
 		name: "1Yie",
 		role: "作者",
-		url: "https://github.com/1Yie/autosecrets",
+		url: "https://github.com/1Yie",
+		github: "1Yie",
 	},
 ];
 
@@ -92,7 +98,8 @@ const THANKS: Person[] = [
 	{
 		name: "kmou424",
 		role: "原始作者",
-		url: ORIGINAL_REPO_URL,
+		url: "https://github.com/kmou424",
+		github: "kmou424",
 	},
 ];
 

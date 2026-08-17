@@ -6,7 +6,14 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), babel({ presets: [reactCompilerPreset()] })],
+  plugins: [
+    react(),
+    tailwindcss(),
+    babel({
+      presets: [reactCompilerPreset()],
+      exclude: /(?:^|[/\\])Beams\.jsx$/,
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -14,7 +21,10 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": { target: process.env.CORE_URL ?? "http://127.0.0.1:18080", changeOrigin: false },
+      "/api": {
+        target: process.env.CORE_URL ?? "http://127.0.0.1:18080",
+        changeOrigin: false,
+      },
     },
   },
 });

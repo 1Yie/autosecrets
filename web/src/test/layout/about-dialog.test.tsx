@@ -42,6 +42,7 @@ describe("DashboardLayout about dialog", () => {
 		expect(screen.getByText("kmou424")).toBeVisible();
 		expect(screen.getByText("原始作者")).toBeVisible();
 		expect(screen.getByText("github.com/1Yie/autosecrets")).toBeVisible();
+		expect(document.querySelectorAll('[data-slot="avatar"]')).toHaveLength(2);
 
 		await user.click(screen.getByRole("button", { name: "关闭" }));
 		await waitFor(() => {
