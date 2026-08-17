@@ -8,21 +8,28 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 )
 
 type Config struct {
-	ListenAddr        string
-	ManagementBase    string
-	AgentBase         string
-	TrustedProxyCIDRs []*net.IPNet
-	ProxyCertHeader   string
-	Version           string
-	PublicURL         string
-	OIDCIssuerURL     string
-	OIDCClientID      string
-	OIDCClientSecret  string
-	OIDCScopes        []string
+	ListenAddr            string
+	ManagementBase        string
+	AgentBase             string
+	TrustedProxyCIDRs     []*net.IPNet
+	ProxyCertHeader       string
+	Version               string
+	PublicURL             string
+	OIDCIssuerURL         string
+	OIDCClientID          string
+	OIDCClientSecret      string
+	OIDCScopes            []string
+	OAuthAuthorizationURL string
+	OAuthTokenURL         string
+	OAuthUserinfoURL      string
+	OAuthClientID         string
+	OAuthClientSecret     string
+	OAuthScopes           []string
 }
 
 const (
@@ -74,17 +81,23 @@ func FromEnv() (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		ListenAddr:        envOr("CORE_LISTEN_ADDR", defaultListenAddr),
-		ManagementBase:    envOr("CORE_MANAGEMENT_BASE", defaultManagementBase),
-		AgentBase:         envOr("CORE_AGENT_BASE", defaultAgentBase),
-		TrustedProxyCIDRs: cidrs,
-		ProxyCertHeader:   envOr("CORE_PROXY_CERT_HEADER", defaultCertHeader),
-		Version:           os.Getenv("CORE_VERSION"),
-		PublicURL:         strings.TrimRight(os.Getenv("CORE_PUBLIC_URL"), "/"),
-		OIDCIssuerURL:     strings.TrimRight(os.Getenv("CORE_OIDC_ISSUER_URL"), "/"),
-		OIDCClientID:      os.Getenv("CORE_OIDC_CLIENT_ID"),
-		OIDCClientSecret:  os.Getenv("CORE_OIDC_CLIENT_SECRET"),
-		OIDCScopes:        oidcScopes(os.Getenv("CORE_OIDC_SCOPES")),
+		ListenAddr:            envOr("CORE_LISTEN_ADDR", defaultListenAddr),
+		ManagementBase:        envOr("CORE_MANAGEMENT_BASE", defaultManagementBase),
+		AgentBase:             envOr("CORE_AGENT_BASE", defaultAgentBase),
+		TrustedProxyCIDRs:     cidrs,
+		ProxyCertHeader:       envOr("CORE_PROXY_CERT_HEADER", defaultCertHeader),
+		Version:               os.Getenv("CORE_VERSION"),
+		PublicURL:             strings.TrimRight(os.Getenv("CORE_PUBLIC_URL"), "/"),
+		OIDCIssuerURL:         strings.TrimRight(os.Getenv("CORE_OIDC_ISSUER_URL"), "/"),
+		OIDCClientID:          os.Getenv("CORE_OIDC_CLIENT_ID"),
+		OIDCClientSecret:      os.Getenv("CORE_OIDC_CLIENT_SECRET"),
+		OIDCScopes:            oidcScopes(os.Getenv("CORE_OIDC_SCOPES")),
+		OAuthAuthorizationURL: strings.TrimRight(os.Getenv("CORE_OAUTH_AUTHORIZATION_URL"), "/"),
+		OAuthTokenURL:         strings.TrimRight(os.Getenv("CORE_OAUTH_TOKEN_URL"), "/"),
+		OAuthUserinfoURL:      strings.TrimRight(os.Getenv("CORE_OAUTH_USERINFO_URL"), "/"),
+		OAuthClientID:         os.Getenv("CORE_OAUTH_CLIENT_ID"),
+		OAuthClientSecret:     os.Getenv("CORE_OAUTH_CLIENT_SECRET"),
+		OAuthScopes:           oauthScopes(os.Getenv("CORE_OAUTH_SCOPES")),
 	}, nil
 }
 
@@ -113,6 +126,65 @@ func (c Config) OIDCConfigurationError() error {
 		return fmt.Errorf("CORE_OIDC_ISSUER_URL must be an HTTPS URL except on localhost")
 	}
 	return nil
+}
+
+// OAuthConfigurationError reports why OAuth is unavailable without making
+// local authentication or OIDC configuration fail.
+func (c Config) OAuthConfigurationError() error {
+	configured := c.OAuthAuthorizationURL != "" || c.OAuthTokenURL != "" || c.OAuthUserinfoURL != "" || c.OAuthClientID != "" || c.OAuthClientSecret != ""
+	if !configured {
+		return fmt.Errorf("OAuth is not configured")
+	}
+	if c.PublicURL == "" || c.OAuthAuthorizationURL == "" || c.OAuthTokenURL == "" || c.OAuthUserinfoURL == "" || c.OAuthClientID == "" {
+		return fmt.Errorf("CORE_PUBLIC_URL, CORE_OAUTH_AUTHORIZATION_URL, CORE_OAUTH_TOKEN_URL, CORE_OAUTH_USERINFO_URL, and CORE_OAUTH_CLIENT_ID are required")
+	}
+	publicURL, err := url.Parse(c.PublicURL)
+	if err != nil || publicURL.Host == "" || publicURL.Path != "" || publicURL.RawQuery != "" || publicURL.Fragment != "" {
+		return fmt.Errorf("CORE_PUBLIC_URL must be a canonical origin")
+	}
+	if publicURL.Scheme != "https" && !(publicURL.Scheme == "http" && isLoopbackHost(publicURL.Hostname())) {
+		return fmt.Errorf("CORE_PUBLIC_URL must use HTTPS except on localhost")
+	}
+	for _, raw := range []struct {
+		name  string
+		value string
+	}{
+		{"CORE_OAUTH_AUTHORIZATION_URL", c.OAuthAuthorizationURL},
+		{"CORE_OAUTH_TOKEN_URL", c.OAuthTokenURL},
+		{"CORE_OAUTH_USERINFO_URL", c.OAuthUserinfoURL},
+	} {
+		parsed, err := url.Parse(raw.value)
+		if err != nil || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("%s must be an HTTPS URL except on localhost", raw.name)
+		}
+		if parsed.Scheme == "https" {
+			continue
+		}
+		if parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname()) {
+			continue
+		}
+		return fmt.Errorf("%s must be an HTTPS URL except on localhost", raw.name)
+	}
+	return nil
+}
+
+func oauthScopes(raw string) []string {
+	if raw == "" {
+		return []string{"profile"}
+	}
+	seen := map[string]bool{}
+	var result []string
+	for _, scope := range strings.Fields(strings.ReplaceAll(raw, ",", " ")) {
+		if scope == "offline_access" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		result = append(result, scope)
+	}
+	if len(result) == 0 {
+		return []string{"profile"}
+	}
+	return result
 }
 
 func oidcScopes(raw string) []string {
@@ -161,4 +233,32 @@ func splitCSV(value string) []string {
 		return nil
 	}
 	return strings.Split(value, ",")
+}
+
+// BuildVersion is the running binary's version. CORE_VERSION wins when set;
+// otherwise this is the embedded VCS revision, then fallback.
+func BuildVersion(fallback string) string {
+	if version := strings.TrimSpace(os.Getenv("CORE_VERSION")); version != "" {
+		return version
+	}
+	if version := vcsRevision(); version != "" {
+		return version
+	}
+	if fallback == "" {
+		return "dev"
+	}
+	return fallback
+}
+
+func vcsRevision() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" && setting.Value != "" {
+			return setting.Value
+		}
+	}
+	return ""
 }

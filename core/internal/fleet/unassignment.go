@@ -16,12 +16,12 @@ func (h *Handler) handleUnassign(w http.ResponseWriter, r *http.Request) {
 		OperationReason *middleware.OperationReasonInput `json:"operation_reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "无效的 JSON")
 		return
 	}
 	reason, ok := middleware.OperationReasonOr(body.OperationReason)
 	if !ok {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "需要提供有效的操作原因分类和 10-500 字符的说明")
 		return
 	}
 	if _, err := h.store.AssignmentByID(r.Context(), assignmentID); err != nil {
@@ -51,7 +51,7 @@ func (h *Handler) handleUnassignmentState(w http.ResponseWriter, r *http.Request
 	}
 	tasks, err := h.store.ListUnassignmentTasks(r.Context(), assignmentID)
 	if err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{
@@ -67,12 +67,12 @@ func (h *Handler) handleAbandonCleanup(w http.ResponseWriter, r *http.Request) {
 		OperationReason *middleware.OperationReasonInput `json:"operation_reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "invalid JSON")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "无效的 JSON")
 		return
 	}
 	reason, ok := middleware.OperationReasonOr(body.OperationReason)
 	if !ok {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "需要提供有效的操作原因分类和 10-500 字符的说明")
 		return
 	}
 	if _, err := h.store.AssignmentByID(r.Context(), assignmentID); err != nil {

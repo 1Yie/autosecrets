@@ -1,6 +1,8 @@
 import "@testing-library/jest-dom/vitest";
 import { afterAll, afterEach, beforeAll } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { toastManager } from "../components/ui/toast";
+import { SUCCESS_TOAST_ID } from "../lib/toast";
 import { server } from "./server";
 
 // input-otp measures its slots with ResizeObserver, which jsdom lacks.
@@ -23,7 +25,10 @@ if (typeof Element.prototype.getAnimations !== "function") {
   Element.prototype.getAnimations = () => [];
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  toastManager.close(SUCCESS_TOAST_ID);
+  cleanup();
+});
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());

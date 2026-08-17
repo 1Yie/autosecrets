@@ -465,6 +465,17 @@ func (s *Store) ExternalIdentityBinding(ctx context.Context) (*ExternalIdentityB
 	}, nil
 }
 
+func (s *Store) OAuthIdentityBinding(ctx context.Context) (*ExternalIdentityBinding, error) {
+	row, err := s.q.OAuthIdentityBinding(ctx)
+	if err != nil {
+		return nil, mapNoRows(err)
+	}
+	return &ExternalIdentityBinding{
+		MemberID: row.AdminID, Issuer: row.Issuer, Subject: row.Subject,
+		DisplayName: row.DisplayName, CreatedAt: row.CreatedAt,
+	}, nil
+}
+
 func (s *Store) CreateOIDCTransaction(ctx context.Context, stateHash, purpose, memberID, nonce, verifier, returnTo string, expiresAt time.Time) error {
 	adminID := pgtype.UUID{}
 	if memberID != "" {
@@ -545,6 +556,56 @@ func (s *Store) UnbindExternalIdentity(ctx context.Context, memberID, currentSes
 	return tx.Commit(ctx)
 }
 
+func (s *Store) BindOAuthIdentity(ctx context.Context, binding ExternalIdentityBinding, currentSessionHash string, audit AuditEvent) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	rows, err := q.InsertOAuthIdentityBinding(ctx, gen.InsertOAuthIdentityBindingParams{
+		AdminID: binding.MemberID, Issuer: binding.Issuer, Subject: binding.Subject, DisplayName: binding.DisplayName,
+	})
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return ErrConflict
+	}
+	if err := q.DeleteOtherMemberSessions(ctx, gen.DeleteOtherMemberSessionsParams{AdminID: binding.MemberID, IDHash: currentSessionHash}); err != nil {
+		return err
+	}
+	if err := q.DeleteMemberStepUpGrants(ctx, binding.MemberID); err != nil {
+		return err
+	}
+	if err := appendAuditTx(ctx, q, audit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) UnbindOAuthIdentity(ctx context.Context, memberID, currentSessionHash string, audit AuditEvent) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.DeleteOAuthIdentityBinding(ctx, memberID); err != nil {
+		return err
+	}
+	if err := q.DeleteOtherMemberSessions(ctx, gen.DeleteOtherMemberSessionsParams{AdminID: memberID, IDHash: currentSessionHash}); err != nil {
+		return err
+	}
+	if err := q.DeleteMemberStepUpGrants(ctx, memberID); err != nil {
+		return err
+	}
+	if err := appendAuditTx(ctx, q, audit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // ChangePassword updates the password hash, revokes every Session (and with
 // them their Step-up Grants via cascade), and appends the Audit Event in the
 // same transaction (implementation-plan: security-relevant changes are
@@ -558,6 +619,31 @@ func (s *Store) ChangePassword(ctx context.Context, memberID, passwordHash strin
 	q := s.q.WithTx(tx)
 
 	if err := q.UpdatePassword(ctx, gen.UpdatePasswordParams{ID: memberID, PasswordHash: passwordHash}); err != nil {
+		return err
+	}
+	if err := q.DeleteMemberSessions(ctx, memberID); err != nil {
+		return err
+	}
+	if err := appendAuditTx(ctx, q, audit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ChangeUsername updates the local login name, revokes every Session, and
+// appends the Audit Event in the same transaction.
+func (s *Store) ChangeUsername(ctx context.Context, memberID, username string, audit AuditEvent) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+
+	if err := q.UpdateUsername(ctx, gen.UpdateUsernameParams{ID: memberID, Username: username}); err != nil {
+		if isUniqueViolation(err) {
+			return ErrDuplicate
+		}
 		return err
 	}
 	if err := q.DeleteMemberSessions(ctx, memberID); err != nil {

@@ -1,120 +1,284 @@
-import { Fragment, useEffect, useState } from "react";
+import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { MoreVertical } from "lucide-react";
 import { useUpdateBinding } from "../../hooks/applications/use-update-binding";
+import { useDeleteSecret } from "../../hooks/applications/use-delete-secret";
+import { ConfirmDelete } from "../../components/confirm-delete";
 import { bindingSchema, type BindingForm } from "../../lib/constants/schemas";
-import { SAFE_BINDING_MODES, DEFAULT_BINDING_MODE } from "../../lib/constants/modes";
+import {
+	SAFE_BINDING_MODES,
+	DEFAULT_BINDING_MODE,
+	BINDING_MODE_LABELS,
+	bindingModeLabel,
+} from "../../lib/constants/modes";
+import { toastSuccess } from "../../lib/toast";
 import type { SecretRow } from "../../hooks/applications/use-secrets";
 import { Button } from "../../components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/select";
+import { Field, FieldError, FieldLabel } from "../../components/ui/field";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../../components/ui/select";
 import { TableCell, TableRow } from "../../components/ui/table";
+import {
+	Dialog,
+	DialogClose,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogPanel,
+	DialogPopup,
+	DialogTitle,
+} from "../../components/ui/dialog";
+import {
+	Menu,
+	MenuItem,
+	MenuPopup,
+	MenuTrigger,
+} from "../../components/ui/menu";
 import { SegmentedPathInput } from "../../components/segmented-path-input";
 import { UpdateValueButton } from "./update-value-button";
 
 interface SecretTableRowProps {
-  secret: SecretRow;
-  appId: string;
-  envId: string;
+	secret: SecretRow;
+	appId: string;
+	envId: string;
 }
 
-/** One row of the secrets table. The binding path and permission mode share
- * one react-hook-form instance so the single 保存 button persists both. */
 export function SecretTableRow({ secret, appId, envId }: SecretTableRowProps) {
-  const update = useUpdateBinding(secret.id, appId, envId);
-  const [advanced, setAdvanced] = useState(false);
-  const methods = useForm<BindingForm>({
-    resolver: zodResolver(bindingSchema),
-    defaultValues: {
-      path: secret.binding?.path ?? "",
-      mode: (secret.binding?.mode ?? DEFAULT_BINDING_MODE) as BindingForm["mode"],
-    },
-  });
+	const remove = useDeleteSecret(appId, envId);
+	const [bindingOpen, setBindingOpen] = useState(false);
+	const [deleteOpen, setDeleteOpen] = useState(false);
+	const path = secret.binding?.path ?? "";
+	const mode = secret.binding?.mode;
 
-  useEffect(() => {
-    methods.reset({
-      path: secret.binding?.path ?? "",
-      mode: (secret.binding?.mode ?? DEFAULT_BINDING_MODE) as BindingForm["mode"],
-    });
-  }, [secret.binding, methods.reset]);
+	return (
+		<TableRow className="border-b">
+			<TableCell className="p-2 font-mono">{secret.name}</TableCell>
+			<TableCell className="p-2">
+				<div className="min-w-0">
+					<p
+						className={
+							path ? "truncate font-mono text-sm" : "text-sm text-muted-foreground"
+						}
+						data-testid={`binding-path-${secret.name}`}
+						title={path || undefined}
+					>
+						{path || "未设置"}
+					</p>
+					{mode ? (
+						<p className="text-xs text-muted-foreground">{bindingModeLabel(mode)}</p>
+					) : null}
+				</div>
+			</TableCell>
+			<TableCell className="p-2">
+				<SecretVersion
+					name={secret.name}
+					selected={secret.selected_version}
+					latest={secret.latest_version}
+				/>
+			</TableCell>
+			<TableCell className="p-2">
+				<div className="flex items-center justify-end gap-1">
+					<UpdateValueButton secret={secret} appId={appId} envId={envId} />
+					<Menu>
+						<MenuTrigger
+							aria-label={`${secret.name} 更多操作`}
+							render={<Button variant="outline" size="icon-sm" />}
+						>
+							<MoreVertical />
+						</MenuTrigger>
+						<MenuPopup align="end" side="bottom">
+							<MenuItem closeOnClick onClick={() => setBindingOpen(true)}>
+								编辑绑定
+							</MenuItem>
+							<MenuItem
+								closeOnClick
+								variant="destructive"
+								onClick={() => setDeleteOpen(true)}
+							>
+								删除
+							</MenuItem>
+						</MenuPopup>
+					</Menu>
+				</div>
+				<BindingEditorDialog
+					secret={secret}
+					appId={appId}
+					envId={envId}
+					open={bindingOpen}
+					onOpenChange={setBindingOpen}
+				/>
+				<ConfirmDelete
+					open={deleteOpen}
+					onOpenChange={setDeleteOpen}
+					title={`删除密钥 ${secret.name}？`}
+					description="会删除该密钥及其版本。若环境仍绑定到节点组，需要先解除分配。"
+					pending={remove.isPending}
+					error={
+						remove.isError ? String((remove.error as Error).message) : undefined
+					}
+					onConfirm={() =>
+						remove.mutate(secret.id, {
+							onSuccess: () => setDeleteOpen(false),
+						})
+					}
+				/>
+			</TableCell>
+		</TableRow>
+	);
+}
 
-  const onSubmit = (v: BindingForm) => update.mutate({ ...v, uid: 0, gid: 0 });
+function BindingEditorDialog({
+	secret,
+	appId,
+	envId,
+	open,
+	onOpenChange,
+}: {
+	secret: SecretRow;
+	appId: string;
+	envId: string;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+}) {
+	const update = useUpdateBinding(secret.id, appId, envId);
+	const methods = useForm<BindingForm>({
+		resolver: zodResolver(bindingSchema),
+		defaultValues: bindingDefaults(secret),
+	});
 
-  return (
-    <Fragment>
-      <TableRow className="border-b">
-        <TableCell className="p-2 font-mono">{secret.name}</TableCell>
-        <TableCell className="p-2">
-          <Controller
-            name="path"
-            control={methods.control}
-            render={({ field }) => (
-              <SegmentedPathInput
-                value={field.value}
-                onChange={field.onChange}
-                onBlur={field.onBlur}
-                name={field.name}
-                testId={`binding-${secret.name}`}
-              />
-            )}
-          />
-          {methods.formState.errors.path && (
-            <p className="text-xs text-red-500">{methods.formState.errors.path.message}</p>
-          )}
-        </TableCell>
-        <TableCell className="p-2">
-          {secret.selected_version}/{secret.latest_version}
-        </TableCell>
-        <TableCell className="p-2">
-          <div className="flex items-center justify-end gap-1">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-8"
-              disabled={!methods.formState.isDirty || update.isPending}
-              onClick={() => methods.handleSubmit(onSubmit)()}
-            >
-              保存
-            </Button>
-            <UpdateValueButton secret={secret} appId={appId} envId={envId} />
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-6 w-6 p-0 text-muted-foreground"
-              aria-expanded={advanced}
-              aria-label="高级设置"
-              onClick={() => setAdvanced((v) => !v)}
-            >
-              {advanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
-      {advanced && (
-        <TableRow className="border-b bg-muted/30">
-          <TableCell colSpan={4} className="p-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">权限</span>
-              <Controller
-                name="mode"
-                control={methods.control}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger className="h-8 w-24" data-testid={`mode-${secret.name}`}>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SAFE_BINDING_MODES.map((m) => (
-                        <SelectItem key={m} value={m}>{m}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </Fragment>
-  );
+	return (
+		<Dialog
+			open={open}
+			onOpenChange={(next) => {
+				if (next) {
+					methods.reset(bindingDefaults(secret));
+				}
+				onOpenChange(next);
+			}}
+		>
+			<DialogPopup>
+				<DialogHeader>
+					<DialogTitle>编辑绑定</DialogTitle>
+					<DialogDescription>
+						把 {secret.name} 映射到 Materialized Bundle 中的相对路径和权限。
+					</DialogDescription>
+				</DialogHeader>
+				<form
+					className="contents"
+					onSubmit={methods.handleSubmit((values) => {
+						update.mutate(
+							{ ...values, uid: 0, gid: 0 },
+							{
+								onSuccess: () => {
+									toastSuccess("绑定已更新");
+									onOpenChange(false);
+								},
+							},
+						);
+					})}
+				>
+					<DialogPanel>
+						<div className="flex flex-col gap-4">
+							<Field
+								className="w-full"
+								invalid={Boolean(methods.formState.errors.path)}
+							>
+								<FieldLabel>绑定路径</FieldLabel>
+								<Controller
+									name="path"
+									control={methods.control}
+									render={({ field }) => (
+										<SegmentedPathInput
+											value={field.value}
+											onChange={field.onChange}
+											onBlur={field.onBlur}
+											name={field.name}
+											testId={`binding-${secret.name}`}
+										/>
+									)}
+								/>
+								{methods.formState.errors.path && (
+									<FieldError>{methods.formState.errors.path.message}</FieldError>
+								)}
+							</Field>
+							<Field className="w-full">
+								<FieldLabel>权限</FieldLabel>
+								<Controller
+									name="mode"
+									control={methods.control}
+									render={({ field }) => (
+										<Select value={field.value} onValueChange={field.onChange}>
+											<SelectTrigger
+												className="w-full"
+												data-testid={`mode-${secret.name}`}
+											>
+												<SelectValue>
+													{(value) => bindingModeLabel(String(value ?? ""))}
+												</SelectValue>
+											</SelectTrigger>
+											<SelectContent alignItemWithTrigger={false}>
+												{SAFE_BINDING_MODES.map((item) => (
+													<SelectItem key={item} value={item}>
+														{BINDING_MODE_LABELS[item]}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									)}
+								/>
+							</Field>
+							{update.isError && (
+								<p className="text-sm text-red-500">
+									{String((update.error as Error).message)}
+								</p>
+							)}
+						</div>
+					</DialogPanel>
+					<DialogFooter>
+						<DialogClose render={<Button variant="ghost" />}>取消</DialogClose>
+						<Button
+							type="submit"
+							loading={update.isPending}
+							disabled={!methods.formState.isDirty}
+						>
+							保存
+						</Button>
+					</DialogFooter>
+				</form>
+			</DialogPopup>
+		</Dialog>
+	);
+}
+
+function SecretVersion({
+	name,
+	selected,
+	latest,
+}: {
+	name: string;
+	selected: number;
+	latest: number;
+}) {
+	const behind = selected !== latest;
+	return (
+		<div className="min-w-0" data-testid={`version-${name}`}>
+			<p className="text-sm">v{selected}</p>
+			{behind ? (
+				<p className="text-xs text-muted-foreground">最新 v{latest}</p>
+			) : null}
+		</div>
+	);
+}
+
+function bindingDefaults(secret: SecretRow): BindingForm {
+	return {
+		path: secret.binding?.path ?? "",
+		mode: (secret.binding?.mode ?? DEFAULT_BINDING_MODE) as BindingForm["mode"],
+	};
 }

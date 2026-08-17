@@ -160,6 +160,18 @@ ON CONFLICT DO NOTHING;
 -- name: DeleteExternalIdentityBinding :exec
 DELETE FROM external_identity_binding WHERE singleton AND admin_id = $1;
 
+-- name: OAuthIdentityBinding :one
+SELECT admin_id, issuer, subject, display_name, created_at
+FROM oauth_identity_binding WHERE singleton;
+
+-- name: InsertOAuthIdentityBinding :execrows
+INSERT INTO oauth_identity_binding (singleton, admin_id, issuer, subject, display_name)
+VALUES (true, $1, $2, $3, $4)
+ON CONFLICT DO NOTHING;
+
+-- name: DeleteOAuthIdentityBinding :exec
+DELETE FROM oauth_identity_binding WHERE singleton AND admin_id = $1;
+
 -- name: InsertOIDCTransaction :exec
 INSERT INTO oidc_transactions
   (state_hash, purpose, admin_id, nonce, pkce_verifier, return_to, expires_at)
@@ -172,6 +184,9 @@ RETURNING purpose, admin_id, nonce, pkce_verifier, return_to;
 
 -- name: UpdatePassword :exec
 UPDATE admins SET password_hash = $2 WHERE id = $1;
+
+-- name: UpdateUsername :exec
+UPDATE admins SET username = $2 WHERE id = $1;
 
 -- name: SelectMemberRoleStatus :one
 SELECT role, status FROM admins WHERE id = $1 FOR UPDATE;

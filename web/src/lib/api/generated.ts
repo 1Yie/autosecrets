@@ -174,6 +174,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/username": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Username after current password and TOTP when the local policy requires it */
+        post: operations["changeUsername"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/password": {
         parameters: {
             query?: never;
@@ -242,6 +259,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/oauth/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Minimal anonymous OAuth availability and binding state */
+        get: operations["getOAuthStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Start an anonymous OAuth authorization-code transaction */
+        get: operations["startOAuthLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Exchange the authorization code and complete login or binding */
+        get: operations["completeOAuthTransaction"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/security": {
         parameters: {
             query?: never;
@@ -249,7 +317,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Authenticated local TOTP policy and OIDC binding/configuration state */
+        /** Authenticated local TOTP policy and External Identity binding state */
         get: operations["getAuthenticationSecurity"];
         put?: never;
         post?: never;
@@ -272,6 +340,24 @@ export interface paths {
         post: operations["startOIDCBinding"];
         /** Re-authenticate locally and remove the External Identity Binding */
         delete: operations["deleteOIDCBinding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oauth/binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-authenticate locally and start an OAuth External Identity Binding transaction */
+        post: operations["startOAuthBinding"];
+        /** Re-authenticate locally and remove the OAuth External Identity Binding */
+        delete: operations["deleteOAuthBinding"];
         options?: never;
         head?: never;
         patch?: never;
@@ -340,7 +426,8 @@ export interface paths {
         get: operations["getApplication"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete an Application that has no active Assignments */
+        delete: operations["deleteApplication"];
         options?: never;
         head?: never;
         patch?: never;
@@ -355,9 +442,26 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create an explicitly classified Environment inside an Application */
+        /** Create an Environment inside an Application */
         post: operations["createEnvironment"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/applications/{appID}/environments/{envID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an Environment that has no active Assignments */
+        delete: operations["deleteEnvironment"];
         options?: never;
         head?: never;
         patch?: never;
@@ -376,6 +480,23 @@ export interface paths {
         /** Create a Secret with its first encrypted value */
         post: operations["createSecret"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/secrets/{secretID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a Secret that is not part of an active Assignment */
+        delete: operations["deleteSecret"];
         options?: never;
         head?: never;
         patch?: never;
@@ -497,6 +618,23 @@ export interface paths {
         /** Create a Node Group */
         post: operations["createNodeGroup"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/node-groups/{groupID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a Node Group that has no active Assignments */
+        delete: operations["deleteNodeGroup"];
         options?: never;
         head?: never;
         patch?: never;
@@ -640,6 +778,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nodes/{nodeID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Adjust a Managed Node's settings, such as its polling interval */
+        patch: operations["updateNode"];
+        trace?: never;
+    };
     "/api/v1/overview": {
         parameters: {
             query?: never;
@@ -743,26 +898,32 @@ export interface components {
             enrollment_token: string;
             totp_uri: string;
         };
-        OIDCPublicStatus: {
+        ExternalProviderPublicStatus: {
             available: boolean;
             bound: boolean;
             login_available: boolean;
+        };
+        OIDCPublicStatus: components["schemas"]["ExternalProviderPublicStatus"] & {
+            oidc?: components["schemas"]["ExternalProviderPublicStatus"];
+            oauth?: components["schemas"]["ExternalProviderPublicStatus"];
         };
         OIDCBindingProof: {
             password: string;
             totp_code?: string;
             return_to?: string;
         };
+        ExternalProviderSecurity: {
+            available: boolean;
+            bound: boolean;
+            /** Format: uri */
+            issuer?: string;
+            display_name?: string;
+            configuration_error?: string;
+        };
         AuthenticationSecurity: {
             totp_login_required: boolean;
-            oidc: {
-                available: boolean;
-                bound: boolean;
-                /** Format: uri */
-                issuer?: string;
-                display_name?: string;
-                configuration_error?: string;
-            };
+            oidc: components["schemas"]["ExternalProviderSecurity"];
+            oauth: components["schemas"]["ExternalProviderSecurity"];
         };
         LoginResponse: {
             csrf_token: string;
@@ -811,7 +972,7 @@ export interface components {
             idle_expires_at: string;
             totp_login_required: boolean;
             /** @enum {string} */
-            auth_method: "local" | "oidc";
+            auth_method: "local" | "oidc" | "oauth";
         };
         Application: {
             id: string;
@@ -823,8 +984,6 @@ export interface components {
             id: string;
             name: string;
             application_id: string;
-            /** @enum {string} */
-            protection: "standard" | "protected" | "unclassified";
         };
         Binding: {
             path: string;
@@ -922,6 +1081,8 @@ export interface components {
              */
             state: "never_online" | "healthy" | "converging" | "failed" | "offline";
             unassigned: boolean;
+            /** @description How often the Agent polls for Desired State; Core delivers it in the desired/heartbeat responses and the Agent adopts it on its next pass. */
+            poll_interval_seconds: number;
         };
         Overview: {
             /** Format: date-time */
@@ -937,7 +1098,7 @@ export interface components {
             };
             attention: {
                 /** @enum {string} */
-                kind: "failed_convergence" | "offline_node" | "unassigned_node" | "unclassified_environment" | "cleanup_failed" | "cleanup_unconfirmed";
+                kind: "failed_convergence" | "offline_node" | "unassigned_node" | "cleanup_failed" | "cleanup_unconfirmed";
                 count: number;
                 resource?: string;
             }[];
@@ -976,22 +1137,28 @@ export interface components {
             items: components["schemas"]["Application"][];
             /** @description Opaque keyset position; empty on the last page */
             next_cursor: string;
+            /** @description Total matching rows */
+            total?: number;
         };
         NodeGroupPage: {
             items: components["schemas"]["NodeGroup"][];
             next_cursor: string;
+            total?: number;
         };
         AssignmentPage: {
             items: components["schemas"]["Assignment"][];
             next_cursor: string;
+            total?: number;
         };
         NodePage: {
             items: components["schemas"]["Node"][];
             next_cursor: string;
+            total?: number;
         };
         AuditEventPage: {
             items: components["schemas"]["AuditEvent"][];
             next_cursor: string;
+            total?: number;
         };
         Error: {
             /** @description Human-readable message; never parse it */
@@ -1080,6 +1247,12 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Page size (default 25, max 100) */
+        PageLimit: number;
+        /** @description Opaque keyset position from the previous page */
+        PageCursor: string;
+        /** @description 1-based page number; used for jump-to-page */
+        PageNumber: number;
         /** @description Application id (UUID) */
         AppID: string;
         /** @description Environment id (UUID) */
@@ -1131,7 +1304,8 @@ export interface operations {
                 "application/json": {
                     /** @description One-time Bootstrap Code printed by Core on first boot */
                     code: string;
-                    organization_name: string;
+                    /** @description Optional; defaults to AutoSecrets. The name is stored for audit display only and is not shown in the Web console. */
+                    organization_name?: string;
                     username: string;
                     /** @description Argon2id-hashed server-side; never stored in clear */
                     password: string;
@@ -1410,6 +1584,38 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    changeUsername: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    username: string;
+                    current_password: string;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Username changed and current browser Session reissued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Duplicate"];
+        };
+    };
     changePassword: {
         parameters: {
             query?: never;
@@ -1512,6 +1718,77 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    getOAuthStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OAuth availability without operational diagnostics */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalProviderPublicStatus"];
+                };
+            };
+        };
+    };
+    startOAuthLogin: {
+        parameters: {
+            query?: {
+                return_to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirect to the configured OAuth authorization endpoint */
+            302: {
+                headers: {
+                    Location?: string;
+                    /** @description Short-lived autosecrets_oauth_state cookie */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    completeOAuthTransaction: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OAuth transaction completed and redirected to a validated local path */
+            302: {
+                headers: {
+                    Location?: string;
+                    /** @description Expired state cookie and, for login, the AutoSecrets Session */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     getAuthenticationSecurity: {
         parameters: {
             query?: never;
@@ -1592,6 +1869,65 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    startOAuthBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCBindingProof"];
+            };
+        };
+        responses: {
+            /** @description Provider authorization URL for the binding transaction */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        authorization_url: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteOAuthBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OIDCBindingProof"];
+            };
+        };
+        responses: {
+            /** @description External Identity Binding removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {boolean} */
+                        bound: false;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     logout: {
         parameters: {
             query?: never;
@@ -1640,7 +1976,14 @@ export interface operations {
     };
     listApplications: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size (default 25, max 100) */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description Opaque keyset position from the previous page */
+                cursor?: components["parameters"]["PageCursor"];
+                /** @description 1-based page number; used for jump-to-page */
+                page?: components["parameters"]["PageNumber"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1717,6 +2060,31 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    deleteApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Application id (UUID) */
+                appID: components["parameters"]["AppID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Application deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     createEnvironment: {
         parameters: {
             query?: never;
@@ -1731,11 +2099,6 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
-                    /**
-                     * @description Explicit classification; never inferred from the name
-                     * @enum {string}
-                     */
-                    protection: "standard" | "protected";
                 };
             };
         };
@@ -1753,6 +2116,33 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Duplicate"];
+        };
+    };
+    deleteEnvironment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Application id (UUID) */
+                appID: components["parameters"]["AppID"];
+                /** @description Environment id (UUID) */
+                envID: components["parameters"]["EnvID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Environment deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listSecrets: {
@@ -1818,6 +2208,31 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Duplicate"];
+        };
+    };
+    deleteSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Secret id (UUID) */
+                secretID: components["parameters"]["SecretID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Secret deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     createSecretVersion: {
@@ -2068,7 +2483,14 @@ export interface operations {
     };
     listNodeGroups: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size (default 25, max 100) */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description Opaque keyset position from the previous page */
+                cursor?: components["parameters"]["PageCursor"];
+                /** @description 1-based page number; used for jump-to-page */
+                page?: components["parameters"]["PageNumber"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2114,6 +2536,31 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Duplicate"];
+        };
+    };
+    deleteNodeGroup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Node Group id (UUID) */
+                groupID: components["parameters"]["GroupID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node Group deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     addGroupMember: {
@@ -2181,7 +2628,14 @@ export interface operations {
     };
     listAssignments: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size (default 25, max 100) */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description Opaque keyset position from the previous page */
+                cursor?: components["parameters"]["PageCursor"];
+                /** @description 1-based page number; used for jump-to-page */
+                page?: components["parameters"]["PageNumber"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2401,7 +2855,14 @@ export interface operations {
     };
     listNodes: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size (default 25, max 100) */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description Opaque keyset position from the previous page */
+                cursor?: components["parameters"]["PageCursor"];
+                /** @description 1-based page number; used for jump-to-page */
+                page?: components["parameters"]["PageNumber"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2418,6 +2879,42 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    updateNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Managed Node id (UUID) */
+                nodeID: components["parameters"]["NodeID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description How often the Agent polls for Desired State (5s-24h); the Agent adopts it after its next heartbeat or desired poll. */
+                    poll_interval_seconds: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated node settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        poll_interval_seconds: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     overview: {
@@ -2489,6 +2986,8 @@ export interface operations {
                 limit?: number;
                 /** @description Opaque keyset position from the previous page */
                 cursor?: string;
+                /** @description 1-based page number; used for jump-to-page */
+                page?: number;
                 /** @description Filter by exact resource display */
                 resource?: string;
                 /** @description Filter by exact outcome code */

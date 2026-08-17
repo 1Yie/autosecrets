@@ -1,9 +1,11 @@
 import { Link } from "react-router-dom";
+import { useDocumentTitle } from "../../hooks/use-document-title";
 import { Button } from "../../components/ui/button";
 
 /** NotFoundPage: rendered for unknown /dashboard/* and unknown top-level
  * routes instead of silently bouncing the user to the overview. */
 export function NotFoundPage() {
+  useDocumentTitle("页面不存在");
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
       <p className="text-6xl font-bold tracking-tight opacity-20">404</p>

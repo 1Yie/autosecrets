@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -32,17 +31,6 @@ func TestOverviewProjection(t *testing.T) {
 		t.Fatalf("overview counts: %s", overview.raw)
 	}
 
-	// An Unclassified Environment must surface as an attention item.
-	legacy := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "legacy", "protection": "standard"}, a.cookie, a.csrf)
-	if legacy.status != http.StatusCreated {
-		t.Fatalf("env: %d %s", legacy.status, legacy.raw)
-	}
-	if _, err := ta.store.Exec(context.Background(),
-		"UPDATE environments SET protection_level = 'unclassified' WHERE id = $1",
-		legacy.body["id"].(string)); err != nil {
-		t.Fatal(err)
-	}
 	// A registered node that never came online.
 	command := ta.installCommand(t, a.cookie, a.csrf, "node-1")
 	ta.enrollNode(t, tokenFromCommand(command), "node-1")
@@ -52,9 +40,6 @@ func TestOverviewProjection(t *testing.T) {
 	kinds := map[string]bool{}
 	for _, raw := range attention {
 		kinds[raw.(map[string]any)["kind"].(string)] = true
-	}
-	if !kinds["unclassified_environment"] {
-		t.Fatalf("unclassified environment must be an attention item: %s", overview.raw)
 	}
 	if !kinds["unassigned_node"] {
 		t.Fatalf("registered unassigned node must be an attention item: %s", overview.raw)

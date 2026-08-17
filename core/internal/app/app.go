@@ -39,11 +39,13 @@ type Options struct {
 	// environment assignment (e.g. "AUTOSECRETS_CURL_OPTS='-k'"). LAN/dev
 	// deployments use it to skip TLS verification of self-signed dev
 	// certificates; production leaves it empty.
-	InstallCurlOpts string
-	Logger          *log.Logger
-	Now             func() time.Time
-	OIDCClient      *identity.OIDCClient
-	OIDCUnavailable string
+	InstallCurlOpts  string
+	Logger           *log.Logger
+	Now              func() time.Time
+	OIDCClient       *identity.OIDCClient
+	OIDCUnavailable  string
+	OAuthClient      *identity.OAuthClient
+	OAuthUnavailable string
 }
 
 // App is the Core service: store, key material, and both HTTP surfaces.
@@ -81,6 +83,7 @@ func New(st *database.Store, mk *crypto.MasterKey, ca *crypto.CA, signer *crypto
 	identitySvc := identity.NewService(st, identityAudit{st: st}, mk, opts.Now)
 	a.identityHandler = identity.NewHandler(identitySvc, opts.PublicURL, opts.TrustedProxy)
 	a.identityHandler.ConfigureOIDC(opts.OIDCClient, opts.OIDCUnavailable)
+	a.identityHandler.ConfigureOAuth(opts.OAuthClient, opts.OAuthUnavailable)
 	a.secretsHandler = secrets.NewHandler(st, mk, opts.Now)
 	a.fleetHandler = fleet.NewHandler(st, mk, ca, signer, opts.Now, fleet.Config{
 		PublicAgentURL:  opts.PublicAgentURL,

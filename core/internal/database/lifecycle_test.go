@@ -42,14 +42,14 @@ func TestStoreLifecycle(t *testing.T) {
 	}
 
 	// Environments.
-	if err := st.CreateEnvironment(ctx, uuid.NewString(), appID, "production", "standard"); err != nil {
+	if err := st.CreateEnvironment(ctx, uuid.NewString(), appID, "production"); err != nil {
 		t.Fatal(err)
 	}
 	envID := uuid.NewString()
-	if err := st.CreateEnvironment(ctx, envID, appID, "staging", "standard"); err != nil {
+	if err := st.CreateEnvironment(ctx, envID, appID, "staging"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateEnvironment(ctx, uuid.NewString(), appID, "production", "standard"); err != database.ErrDuplicate {
+	if err := st.CreateEnvironment(ctx, uuid.NewString(), appID, "production"); err != database.ErrDuplicate {
 		t.Fatalf("duplicate environment must be ErrDuplicate, got %v", err)
 	}
 	envs, err := st.ListEnvironments(ctx, appID)

@@ -25,9 +25,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("configuration error: %v", err)
 	}
-	if cfg.Version == "" {
-		cfg.Version = version
-	}
+	cfg.Version = config.BuildVersion(version)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -68,17 +66,34 @@ func main() {
 			log.Printf("OIDC unavailable; local login remains enabled: %v", err)
 		}
 	}
+	var oauthClient *identity.OAuthClient
+	oauthUnavailable := ""
+	if err := cfg.OAuthConfigurationError(); err != nil {
+		oauthUnavailable = err.Error()
+	} else {
+		oauthClient, err = identity.NewOAuthClient(identity.OAuthConfig{
+			PublicURL: cfg.PublicURL, AuthorizationURL: cfg.OAuthAuthorizationURL, TokenURL: cfg.OAuthTokenURL,
+			UserinfoURL: cfg.OAuthUserinfoURL, ClientID: cfg.OAuthClientID, ClientSecret: cfg.OAuthClientSecret,
+			Scopes: cfg.OAuthScopes,
+		})
+		if err != nil {
+			oauthUnavailable = err.Error()
+			log.Printf("OAuth unavailable; local login remains enabled: %v", err)
+		}
+	}
 
 	application := app.New(st, mk, ca, signer, cfg.ManagementBase, cfg.AgentBase, app.Options{
-		Version:         cfg.Version,
-		PublicURL:       cfg.PublicURL,
-		PublicAgentURL:  config.PublicAgentURL(),
-		ArtifactDir:     config.ArtifactDir(),
-		InstallCurlOpts: config.InstallCurlOpts(),
-		TrustedProxy:    cfg.TrustedProxyCIDRs,
-		CertHeader:      cfg.ProxyCertHeader,
-		OIDCClient:      oidcClient,
-		OIDCUnavailable: oidcUnavailable,
+		Version:          cfg.Version,
+		PublicURL:        cfg.PublicURL,
+		PublicAgentURL:   config.PublicAgentURL(),
+		ArtifactDir:      config.ArtifactDir(),
+		InstallCurlOpts:  config.InstallCurlOpts(),
+		TrustedProxy:     cfg.TrustedProxyCIDRs,
+		CertHeader:       cfg.ProxyCertHeader,
+		OIDCClient:       oidcClient,
+		OIDCUnavailable:  oidcUnavailable,
+		OAuthClient:      oauthClient,
+		OAuthUnavailable: oauthUnavailable,
 	})
 	if _, err := application.EmitBootstrapCode(ctx); err != nil {
 		log.Fatalf("bootstrap code error: %v", err)

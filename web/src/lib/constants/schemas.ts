@@ -15,7 +15,6 @@ export const passwordSchema = z
 
 export const bootstrapSchema = z.object({
   code: z.string().min(1, "请输入初始化码"),
-  organization_name: z.string().min(1, "请输入组织名称").max(128, "组织名称最多 128 个字符"),
   username: usernameSchema,
   password: passwordSchema,
 });
@@ -25,8 +24,32 @@ export const loginSchema = z.object({
   password: z.string().min(1, "请输入密码"),
 });
 
+export const changeUsernameSchema = z.object({
+  username: usernameSchema,
+  current_password: z.string().min(1, "请输入当前密码"),
+  totp_code: z
+    .string()
+    .regex(/^\d{6}$/, "请输入 6 位动态验证码")
+    .optional()
+    .or(z.literal("")),
+});
+
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1, "请输入当前密码"),
+  new_password: passwordSchema,
+  totp_code: z
+    .string()
+    .regex(/^\d{6}$/, "请输入 6 位动态验证码")
+    .optional()
+    .or(z.literal("")),
+});
+
 export const secondFactorSchema = z.object({
-  totp_code: z.string().regex(/^\d{6}$/, "请输入 6 位动态验证码").optional().or(z.literal("")),
+  totp_code: z
+    .string()
+    .regex(/^\d{6}$/, "请输入 6 位动态验证码")
+    .optional()
+    .or(z.literal("")),
   recovery_code: z.string().optional().or(z.literal("")),
 });
 
@@ -36,14 +59,24 @@ export const mfaVerifySchema = z.object({
 
 export const operationReasonSchema = z.object({
   category: z.enum(
-    ["maintenance", "incident_response", "access_change", "configuration_correction", "other"],
+    [
+      "maintenance",
+      "incident_response",
+      "access_change",
+      "configuration_correction",
+      "other",
+    ],
     { message: "请选择原因类别" },
   ),
   explanation: z
     .string()
     .min(10, "说明至少 10 个字符")
     .max(500, "说明最多 500 个字符"),
-  external_ref: z.string().max(128, "外部引用最多 128 个字符").optional().or(z.literal("")),
+  external_ref: z
+    .string()
+    .max(128, "外部引用最多 128 个字符")
+    .optional()
+    .or(z.literal("")),
 });
 
 export const nameSchema = z
@@ -58,7 +91,10 @@ export const secretSchema = z.object({
     .trim()
     .min(1, "密钥名不能为空")
     .max(128, "密钥名最多 128 个字符")
-    .refine((v) => !v.includes("/") && !v.includes("\0"), "密钥名不能包含 / 或 NUL"),
+    .refine(
+      (v) => !v.includes("/") && !v.includes("\0"),
+      "密钥名不能包含 / 或 NUL",
+    ),
   value: z.string().min(1, "密钥值不能为空"),
 });
 
@@ -69,7 +105,10 @@ export const bindingSchema = z.object({
     .min(1, "路径不能为空")
     .refine((p) => !p.startsWith("/"), "路径必须是相对路径")
     .refine(
-      (p) => !p.split("/").some((part) => part === "" || part === "." || part === ".."),
+      (p) =>
+        !p
+          .split("/")
+          .some((part) => part === "" || part === "." || part === ".."),
       "路径不能包含空、. 或 .. 组件",
     ),
   mode: z.enum(["0400", "0440", "0444", "0600", "0640", "0644"]),
@@ -84,3 +123,5 @@ export type MFAVerifyForm = z.infer<typeof mfaVerifySchema>;
 export type OperationReasonForm = z.infer<typeof operationReasonSchema>;
 export type SecretForm = z.infer<typeof secretSchema>;
 export type BindingForm = z.infer<typeof bindingSchema>;
+export type ChangeUsernameForm = z.infer<typeof changeUsernameSchema>;
+export type ChangePasswordForm = z.infer<typeof changePasswordSchema>;

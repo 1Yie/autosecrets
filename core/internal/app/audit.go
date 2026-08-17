@@ -38,10 +38,15 @@ func (a *App) handleListAudit(w http.ResponseWriter, r *http.Request) {
 			filter.Limit = n
 		}
 	}
-	events, next, err := a.store.ListAuditPage(r.Context(), filter, afterID)
+	if page := r.URL.Query().Get("page"); page != "" {
+		if n, err := strconv.Atoi(page); err == nil {
+			filter.Page = n
+		}
+	}
+	events, next, total, err := a.store.ListAuditPage(r.Context(), filter, afterID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": events, "next_cursor": next})
+	writeJSON(w, http.StatusOK, map[string]any{"items": events, "next_cursor": next, "total": total})
 }

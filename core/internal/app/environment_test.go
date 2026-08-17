@@ -5,44 +5,39 @@ import (
 	"testing"
 )
 
-// TestEnvironmentProtectionClassification locks the ADR-0016 policy: a new
-// Environment must be explicitly classified standard or protected; legacy
-// rows migrate to unclassified and are not creatable through the API.
-func TestEnvironmentProtectionClassification(t *testing.T) {
+// TestCreateEnvironmentByName locks the product decision that Environment
+// protection classification is gone: create takes only a name.
+func TestCreateEnvironmentByName(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
 
 	missing := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "staging"}, a.cookie, a.csrf)
+		map[string]string{}, a.cookie, a.csrf)
 	if missing.status != http.StatusBadRequest {
-		t.Fatalf("environment without protection must be rejected: %d %s", missing.status, missing.raw)
+		t.Fatalf("environment without name must be rejected: %d %s", missing.status, missing.raw)
 	}
-	invalid := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "staging", "protection": "prod"}, a.cookie, a.csrf)
-	if invalid.status != http.StatusBadRequest {
-		t.Fatalf("unknown protection value must be rejected: %d %s", invalid.status, invalid.raw)
+	staging := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
+		map[string]string{"name": "staging"}, a.cookie, a.csrf)
+	if staging.status != http.StatusCreated || staging.body["name"] != "staging" {
+		t.Fatalf("create staging: %d %s", staging.status, staging.raw)
 	}
-	standard := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "staging", "protection": "standard"}, a.cookie, a.csrf)
-	if standard.status != http.StatusCreated || standard.body["protection"] != "standard" {
-		t.Fatalf("standard environment: %d %s", standard.status, standard.raw)
-	}
-	protected := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "prod", "protection": "protected"}, a.cookie, a.csrf)
-	if protected.status != http.StatusCreated || protected.body["protection"] != "protected" {
-		t.Fatalf("protected environment: %d %s", protected.status, protected.raw)
+	if _, ok := staging.body["protection"]; ok {
+		t.Fatalf("create response must not expose protection: %s", staging.raw)
 	}
 	detail := ta.do(t, "GET", "/api/v1/applications/"+a.appID, nil, a.cookie, "")
 	envs, ok := detail.body["environments"].([]any)
-	if !ok || len(envs) != 3 {
+	if !ok || len(envs) != 2 {
 		t.Fatalf("environment list: %s", detail.raw)
 	}
-	byName := map[string]string{}
+	names := map[string]bool{}
 	for _, raw := range envs {
 		env := raw.(map[string]any)
-		byName[env["name"].(string)] = env["protection"].(string)
+		names[env["name"].(string)] = true
+		if _, ok := env["protection"]; ok {
+			t.Fatalf("listed environment must not expose protection: %s", detail.raw)
+		}
 	}
-	if byName["production"] != "standard" || byName["staging"] != "standard" || byName["prod"] != "protected" {
-		t.Fatalf("protection not listed per environment: %s", detail.raw)
+	if !names["production"] || !names["staging"] {
+		t.Fatalf("expected production and staging: %s", detail.raw)
 	}
 }

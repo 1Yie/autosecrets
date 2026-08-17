@@ -39,12 +39,16 @@ type Repository interface {
 	UpsertStepUpGrant(ctx context.Context, sessionIDHash string, grantedAt, expiresAt time.Time) error
 	DisableTOTP(ctx context.Context, memberID, currentSessionHash string, audit database.AuditEvent) error
 	ExternalIdentityBinding(ctx context.Context) (*database.ExternalIdentityBinding, error)
+	OAuthIdentityBinding(ctx context.Context) (*database.ExternalIdentityBinding, error)
 	CreateOIDCTransaction(ctx context.Context, stateHash, purpose, memberID, nonce, verifier, returnTo string, expiresAt time.Time) error
 	ConsumeOIDCTransaction(ctx context.Context, stateHash string, now time.Time) (*database.OIDCTransaction, error)
 	BindExternalIdentity(ctx context.Context, binding database.ExternalIdentityBinding, currentSessionHash string, audit database.AuditEvent) error
 	UnbindExternalIdentity(ctx context.Context, memberID, currentSessionHash string, audit database.AuditEvent) error
+	BindOAuthIdentity(ctx context.Context, binding database.ExternalIdentityBinding, currentSessionHash string, audit database.AuditEvent) error
+	UnbindOAuthIdentity(ctx context.Context, memberID, currentSessionHash string, audit database.AuditEvent) error
 	DeleteSession(ctx context.Context, idHash string) error
 	ChangePassword(ctx context.Context, memberID, passwordHash string, audit database.AuditEvent) error
+	ChangeUsername(ctx context.Context, memberID, username string, audit database.AuditEvent) error
 }
 
 // AuditRecorder is the narrow cross-domain seam the identity domain uses to

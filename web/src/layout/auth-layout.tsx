@@ -18,7 +18,7 @@ export function AuthLayout() {
           <p className="opacity-70">
             Application → Environment → Bundle Revision → Node Group → Managed Node
           </p>
-          <p className="opacity-50">每次 Publish 都需要 Operation Reason；受保护环境需要最近一次密码确认。</p>
+          <p className="opacity-50">Application、Environment 和 Node Group 分开管理，发布后节点自动同步。</p>
         </div>
         <div className="text-xs opacity-50">Self-hosted Secret 控制面 · 管理面与 Agent 面分离</div>
       </div>

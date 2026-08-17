@@ -159,6 +159,13 @@ GROUP BY ng.id ORDER BY ng.name;
 -- name: CreateNodeGroup :exec
 INSERT INTO node_groups (id, name) VALUES ($1, $2);
 
+-- name: CountActiveAssignmentsForNodeGroup :one
+SELECT count(*) FROM assignments
+WHERE group_id = $1 AND status = 'active';
+
+-- name: DeleteNodeGroupByID :execrows
+DELETE FROM node_groups WHERE id = $1;
+
 -- name: InsertGroupMember :exec
 INSERT INTO group_members (group_id, node_id) VALUES ($1, $2) ON CONFLICT DO NOTHING;
 
@@ -215,11 +222,13 @@ UPDATE assignments SET revision_id = $3
 WHERE application_id = $1 AND environment_id = $2 AND status = 'active';
 
 -- name: ListNode :many
-SELECT id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result
+SELECT id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result,
+       poll_interval_seconds
 FROM nodes ORDER BY name;
 
 -- name: NodeBySerial :one
-SELECT id, name, serial, age_pubkey, created_at, last_seen_at, desired_etag, observed_revision, last_result
+SELECT id, name, serial, age_pubkey, created_at, last_seen_at, desired_etag, observed_revision, last_result,
+       poll_interval_seconds
 FROM nodes WHERE serial = $1;
 
 -- name: TouchNode :exec
@@ -228,6 +237,9 @@ WHERE id = $1;
 
 -- name: SetNodeDesired :exec
 UPDATE nodes SET desired_etag = $2 WHERE id = $1;
+
+-- name: SetNodePollInterval :execrows
+UPDATE nodes SET poll_interval_seconds = $2 WHERE id = $1;
 
 -- name: CreateEnrollmentToken :exec
 INSERT INTO enrollment_tokens (token_hash, name, expires_at) VALUES ($1, $2, $3);
@@ -267,3 +279,41 @@ WHERE secret_id = $1 AND seq = $2;
 
 -- name: SecretAppEnv :one
 SELECT application_id, environment_id FROM secrets WHERE id = $1;
+
+-- name: CountActiveAssignmentsForEnvironment :one
+SELECT count(*) FROM assignments
+WHERE application_id = $1 AND environment_id = $2 AND status = 'active';
+
+-- name: CountActiveAssignmentsForApplication :one
+SELECT count(*) FROM assignments
+WHERE application_id = $1 AND status = 'active';
+
+-- name: CountActiveAssignmentsForSecret :one
+SELECT count(*)
+FROM assignments a
+JOIN secrets s ON s.application_id = a.application_id AND s.environment_id = a.environment_id
+WHERE s.id = $1 AND a.status = 'active';
+
+-- name: DeleteRevisionFilesForSecret :exec
+DELETE FROM revision_files WHERE secret_id = $1;
+
+-- name: DeleteSecretByID :execrows
+DELETE FROM secrets WHERE id = $1;
+
+-- name: DeleteRevisionFilesForEnvironment :exec
+DELETE FROM revision_files
+WHERE revision_id IN (
+  SELECT id FROM bundle_revisions WHERE application_id = $1 AND environment_id = $2
+);
+
+-- name: DeleteEnvironmentByID :execrows
+DELETE FROM environments WHERE id = $1 AND application_id = $2;
+
+-- name: DeleteRevisionFilesForApplication :exec
+DELETE FROM revision_files
+WHERE revision_id IN (
+  SELECT id FROM bundle_revisions WHERE application_id = $1
+);
+
+-- name: DeleteApplicationByID :execrows
+DELETE FROM applications WHERE id = $1;

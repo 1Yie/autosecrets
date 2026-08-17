@@ -35,7 +35,7 @@ func seedSecret(t *testing.T, st *database.Store) (appID, envID, secretID string
 	if err := st.CreateApplication(ctx, appID, "payments"); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.CreateEnvironment(ctx, envID, appID, "production", "standard"); err != nil {
+	if err := st.CreateEnvironment(ctx, envID, appID, "production"); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.CreateSecretWithValue(ctx, secretID, uuid.NewString(), appID, envID,

@@ -37,7 +37,9 @@ def build_server_context(
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
     now = datetime.datetime.now(datetime.UTC)
-    san = [x509.DNSName(hostname)] + [x509.IPAddress(ipaddress.ip_address(ip)) for ip in san_ips]
+    san = [x509.DNSName(hostname)] + [
+        x509.IPAddress(ipaddress.ip_address(ip)) for ip in san_ips
+    ]
     cert = (
         x509.CertificateBuilder()
         .subject_name(name)
@@ -47,18 +49,26 @@ def build_server_context(
         .not_valid_before(now - datetime.timedelta(minutes=5))
         .not_valid_after(now + datetime.timedelta(days=1))
         .add_extension(x509.SubjectAlternativeName(san), critical=False)
-        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key_obj.public_key()), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key_obj.public_key()),
+            critical=False,
+        )
         .sign(ca_key_obj, hashes.SHA256())
     )
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     import tempfile
+
     cert_file = tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False)
     cert_file.write(cert.public_bytes(serialization.Encoding.PEM).decode())
     cert_file.close()
     key_file = tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False)
-    key_file.write(key.private_bytes(serialization.Encoding.PEM,
-                                     serialization.PrivateFormat.PKCS8,
-                                     serialization.NoEncryption()).decode())
+    key_file.write(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+    )
     key_file.close()
     ctx.load_cert_chain(certfile=cert_file.name, keyfile=key_file.name)
     ctx.load_verify_locations(cafile=str(ca_cert))
@@ -69,11 +79,17 @@ def build_server_context(
     return ctx
 
 
-def make_proxy_handler(upstream: str, ca_cert_file: str) -> type[BaseHTTPRequestHandler]:
+def make_proxy_handler(
+    upstream: str, ca_cert_file: str
+) -> type[BaseHTTPRequestHandler]:
     class ProxyHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        PRE_CERT_PATHS = ("/agent/v1/enroll", "/agent/v1/install.sh", "/agent/v1/ca.pem")
+        PRE_CERT_PATHS = (
+            "/agent/v1/enroll",
+            "/agent/v1/install.sh",
+            "/agent/v1/ca.pem",
+        )
 
         def _forward(self) -> None:
             serial = None
@@ -81,15 +97,21 @@ def make_proxy_handler(upstream: str, ca_cert_file: str) -> type[BaseHTTPRequest
                 der = self.connection.getpeercert(binary_form=True)
                 if der:
                     from cryptography import x509
+
                     cert = x509.load_der_x509_certificate(der)
                     ca = x509.load_pem_x509_certificate(Path(ca_cert_file).read_bytes())
                     try:
                         cert.verify_directly_issued_by(ca)
                     except Exception:
-                        self.send_error(403, "client certificate not issued by the Agent CA")
+                        self.send_error(
+                            403, "client certificate not issued by the Agent CA"
+                        )
                         return
                     serial = f"{cert.serial_number:x}"
-            pre_cert = self.path.startswith(self.PRE_CERT_PATHS) or "/agent/v1/artifacts/" in self.path
+            pre_cert = (
+                self.path.startswith(self.PRE_CERT_PATHS)
+                or "/agent/v1/artifacts/" in self.path
+            )
             if not serial and not pre_cert:
                 self.send_error(403, "client certificate required")
                 return
@@ -100,9 +122,14 @@ def make_proxy_handler(upstream: str, ca_cert_file: str) -> type[BaseHTTPRequest
             headers = {k: v for k, v in self.headers.items() if k in FORWARD_HEADERS}
             if serial:
                 headers[SERIAL_HEADER] = serial
-            conn.request(self.command, self.path, body=body, headers=headers)
-            resp = conn.getresponse()
-            data = resp.read()
+            try:
+                conn.request(self.command, self.path, body=body, headers=headers)
+                resp = conn.getresponse()
+                data = resp.read()
+            except OSError:
+                conn.close()
+                self.send_error(502, "upstream unavailable")
+                return
             self.send_response(resp.status)
             for k, v in resp.getheaders():
                 if k.lower() in ("content-type", "content-length", "etag"):
@@ -132,8 +159,9 @@ class DevProxy:
         san_ips: tuple[str, ...] = (),
     ):
         ctx = build_server_context(ca_cert, ca_key, hostname=hostname, san_ips=san_ips)
-        self.httpd = ThreadingHTTPServer((bind, port),
-                                        make_proxy_handler(upstream, str(ca_cert)))
+        self.httpd = ThreadingHTTPServer(
+            (bind, port), make_proxy_handler(upstream, str(ca_cert))
+        )
         self.httpd.socket = ctx.wrap_socket(self.httpd.socket, server_side=True)
         self.port = self.httpd.server_address[1]
         self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
@@ -149,15 +177,26 @@ class DevProxy:
         return f"https://localhost:{self.port}"
 
 
-def http_json(method: str, url: str, body: dict | None = None, cookies: str = "",
-              headers: dict | None = None) -> tuple[int, dict, dict[str, str]]:
+def http_json(
+    method: str,
+    url: str,
+    body: dict | None = None,
+    cookies: str = "",
+    headers: dict | None = None,
+) -> tuple[int, dict, dict[str, str]]:
     import urllib.request
+
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
-        "Content-Type": "application/json" if data else "",
-        "Cookie": cookies,
-        **(headers or {}),
-    })
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Content-Type": "application/json" if data else "",
+            "Cookie": cookies,
+            **(headers or {}),
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode()

@@ -19,11 +19,11 @@ func ValidName(value string, max int) bool {
 // ModeString renders a POSIX file mode as a zero-padded octal string.
 func ModeString(m int64) string { return fmt.Sprintf("%04o", m) }
 
-// PageParams parses the shared cursor and limit query parameters.
-func PageParams(r *http.Request) (database.Cursor, int, error) {
+// PageParams parses the shared cursor, limit, and 1-based page query parameters.
+func PageParams(r *http.Request) (database.Cursor, int, int, error) {
 	cursor, err := database.DecodeCursor(r.URL.Query().Get("cursor"))
 	if err != nil {
-		return database.Cursor{}, 0, err
+		return database.Cursor{}, 0, 0, err
 	}
 	limit := 25
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -34,7 +34,13 @@ func PageParams(r *http.Request) (database.Cursor, int, error) {
 	if limit > 100 {
 		limit = 100
 	}
-	return cursor, limit, nil
+	page := 0
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			page = n
+		}
+	}
+	return cursor, limit, page, nil
 }
 
 // ReasonCategories is the closed set of Operation Reason categories.

@@ -46,17 +46,17 @@ func NewHandler(st *database.Store, mk *crypto.MasterKey, ca *crypto.CA, signer 
 }
 
 func (h *Handler) handleListNodeGroups(w http.ResponseWriter, r *http.Request) {
-	cursor, limit, err := middleware.PageParams(r)
+	cursor, limit, page, err := middleware.PageParams(r)
 	if err != nil {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "无效的分页游标")
 		return
 	}
-	groups, next, err := h.store.ListNodeGroupsPage(r.Context(), cursor, limit)
+	groups, next, total, err := h.store.ListNodeGroupsPage(r.Context(), cursor, limit, page)
 	if err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
-	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": groups, "next_cursor": next})
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": groups, "next_cursor": next, "total": total})
 }
 
 func (h *Handler) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +64,7 @@ func (h *Handler) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) 
 		Name string `json:"name"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !middleware.ValidName(body.Name, 64) {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "name is required (max 64 chars)")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "名称不能为空（最多 64 个字符）")
 		return
 	}
 	id := uuid.NewString()
@@ -73,7 +73,7 @@ func (h *Handler) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) 
 			middleware.WriteError(w, http.StatusConflict, "duplicate", "node group name already exists")
 			return
 		}
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
@@ -81,6 +81,27 @@ func (h *Handler) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) 
 		Result: "ok", CorrelationID: middleware.CorrelationID(h.now, r),
 	})
 	middleware.WriteJSON(w, http.StatusCreated, map[string]string{"id": id, "name": strings.TrimSpace(body.Name)})
+}
+
+func (h *Handler) handleDeleteNodeGroup(w http.ResponseWriter, r *http.Request) {
+	groupID := r.PathValue("groupID")
+	if err := h.store.DeleteNodeGroup(r.Context(), groupID); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			middleware.WriteError(w, http.StatusNotFound, "not_found", "node group not found")
+			return
+		}
+		if errors.Is(err, database.ErrConflict) {
+			middleware.WriteError(w, http.StatusConflict, "conflict", "node group still has an active assignment")
+			return
+		}
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
+		return
+	}
+	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
+		Actor: middleware.ActorFrom(r), Action: "nodegroup.delete", Resource: groupID,
+		Result: "ok", CorrelationID: middleware.CorrelationID(h.now, r),
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) handleAddGroupMember(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +122,7 @@ func (h *Handler) handleAddGroupMember(w http.ResponseWriter, r *http.Request) {
 				"membership would give a managed node multiple sources for the same application and environment")
 			return
 		}
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "member added"})
@@ -109,24 +130,24 @@ func (h *Handler) handleAddGroupMember(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.RemoveGroupMember(r.Context(), r.PathValue("groupID"), r.PathValue("nodeID")); err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "member removed"})
 }
 
 func (h *Handler) handleListAssignments(w http.ResponseWriter, r *http.Request) {
-	cursor, limit, err := middleware.PageParams(r)
+	cursor, limit, page, err := middleware.PageParams(r)
 	if err != nil {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "无效的分页游标")
 		return
 	}
-	assignments, next, err := h.store.ListAssignmentsPage(r.Context(), cursor, limit)
+	assignments, next, total, err := h.store.ListAssignmentsPage(r.Context(), cursor, limit, page)
 	if err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
-	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": assignments, "next_cursor": next})
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": assignments, "next_cursor": next, "total": total})
 }
 
 func (h *Handler) handleCreateAssignment(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +164,7 @@ func (h *Handler) handleCreateAssignment(w http.ResponseWriter, r *http.Request)
 	}
 	reason, ok := middleware.OperationReasonOr(body.OperationReason)
 	if !ok {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "operation_reason with a valid category and a 10-500 character explanation is required")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "需要提供有效的操作原因分类和 10-500 字符的说明")
 		return
 	}
 	asg, err := h.store.CreateAssignment(r.Context(), uuid.NewString(), body.GroupID, body.ApplicationID, body.EnvironmentID)
@@ -159,7 +180,7 @@ func (h *Handler) handleCreateAssignment(w http.ResponseWriter, r *http.Request)
 		case errors.Is(err, database.ErrDuplicate):
 			middleware.WriteError(w, http.StatusConflict, "duplicate", "assignment already exists for this node group and bundle")
 		default:
-			middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+			middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		}
 		return
 	}
@@ -174,17 +195,17 @@ func (h *Handler) handleCreateAssignment(w http.ResponseWriter, r *http.Request)
 func (h *Handler) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	nodes, err := h.store.ListNode(r.Context())
 	if err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	convergence, err := h.store.AllNodeConvergence(r.Context())
 	if err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	counts, err := h.store.NodeAssignmentCounts(r.Context())
 	if err != nil {
-		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		return
 	}
 	now := h.now()
@@ -209,6 +230,7 @@ func (h *Handler) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			"created_at": node.CreatedAt, "last_seen_at": node.LastSeenAt,
 			"desired_etag": node.DesiredETag, "observed_revision": node.ObservedRevision,
 			"last_result": node.LastResult, "state": state, "unassigned": unassigned,
+			"poll_interval_seconds": node.PollIntervalSeconds,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -219,13 +241,15 @@ func (h *Handler) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		}
 		return out[i]["id"].(string) > out[j]["id"].(string)
 	})
-	cursor, limit, err := middleware.PageParams(r)
+	cursor, limit, pageNum, err := middleware.PageParams(r)
 	if err != nil {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "无效的分页游标")
 		return
 	}
 	var start int
-	if cursor.ID != "" {
+	if pageNum > 1 && cursor.ID == "" {
+		start = (pageNum - 1) * limit
+	} else if cursor.ID != "" {
 		for i, item := range out {
 			at := item["created_at"].(time.Time)
 			if item["id"].(string) == cursor.ID && (cursor.At.IsZero() || at.Equal(cursor.At)) {
@@ -246,8 +270,41 @@ func (h *Handler) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			last := out[end-1]
 			next = database.EncodeCursor(last["created_at"].(time.Time), last["id"].(string))
 		}
+	} else {
+		page = []map[string]any{}
 	}
-	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": page, "next_cursor": next})
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": page, "next_cursor": next, "total": len(out)})
+}
+
+// handleUpdateNode adjusts node-level settings such as the Agent polling
+// interval. Returns 404 for unknown nodes.
+func (h *Handler) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PollIntervalSeconds *int `json:"poll_interval_seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PollIntervalSeconds == nil ||
+		*body.PollIntervalSeconds < 5 || *body.PollIntervalSeconds > 86400 {
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request",
+			"poll_interval_seconds must be between 5 and 86400")
+		return
+	}
+	seconds := *body.PollIntervalSeconds
+	if err := h.store.SetNodePollInterval(r.Context(), r.PathValue("nodeID"), seconds); err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			middleware.WriteError(w, http.StatusNotFound, "not_found", "node not found")
+			return
+		}
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
+		return
+	}
+	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
+		Actor: middleware.ActorFrom(r), Action: "node.update", Resource: r.PathValue("nodeID"),
+		Result:        fmt.Sprintf("poll_interval_seconds=%d", seconds),
+		CorrelationID: middleware.CorrelationID(h.now, r),
+	})
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{
+		"id": r.PathValue("nodeID"), "poll_interval_seconds": seconds,
+	})
 }
 
 // Register mounts the management and Agent routes owned by the fleet domain.
@@ -255,6 +312,7 @@ func (h *Handler) Register(mux *http.ServeMux, mgmtBase, agentBase string,
 	requireSession, agentAuth func(http.Handler) http.Handler) {
 	mux.Handle("GET "+mgmtBase+"/node-groups", requireSession(http.HandlerFunc(h.handleListNodeGroups)))
 	mux.Handle("POST "+mgmtBase+"/node-groups", requireSession(http.HandlerFunc(h.handleCreateNodeGroup)))
+	mux.Handle("DELETE "+mgmtBase+"/node-groups/{groupID}", requireSession(http.HandlerFunc(h.handleDeleteNodeGroup)))
 	mux.Handle("POST "+mgmtBase+"/node-groups/{groupID}/nodes", requireSession(http.HandlerFunc(h.handleAddGroupMember)))
 	mux.Handle("DELETE "+mgmtBase+"/node-groups/{groupID}/nodes/{nodeID}", requireSession(http.HandlerFunc(h.handleRemoveGroupMember)))
 	mux.Handle("GET "+mgmtBase+"/assignments", requireSession(http.HandlerFunc(h.handleListAssignments)))
@@ -263,6 +321,7 @@ func (h *Handler) Register(mux *http.ServeMux, mgmtBase, agentBase string,
 	mux.Handle("POST "+mgmtBase+"/assignments/{assignmentID}/unassign", requireSession(http.HandlerFunc(h.handleUnassign)))
 	mux.Handle("POST "+mgmtBase+"/assignments/{assignmentID}/abandon-cleanup", requireSession(http.HandlerFunc(h.handleAbandonCleanup)))
 	mux.Handle("GET "+mgmtBase+"/nodes", requireSession(http.HandlerFunc(h.handleListNodes)))
+	mux.Handle("PATCH "+mgmtBase+"/nodes/{nodeID}", requireSession(http.HandlerFunc(h.handleUpdateNode)))
 	mux.Handle("POST "+mgmtBase+"/nodes/install-command", requireSession(http.HandlerFunc(h.handleInstallCommand)))
 
 	mux.HandleFunc("GET "+agentBase+"/install.sh", h.handleInstallScript)

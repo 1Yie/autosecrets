@@ -127,8 +127,7 @@ func Truncate(t *testing.T, st *database.Store) {
 	t.Helper()
 	_, err := st.Exec(context.Background(), `TRUNCATE organization_config, admins, sessions, bootstrap_codes, audit_events,
 		mfa_enrollments, recovery_codes, step_up_grants, member_invitations,
-		login_challenges, external_identity_binding, oidc_transactions,
-		login_challenges, external_identity_binding, oidc_transactions,
+		login_challenges, external_identity_binding, oauth_identity_binding, oidc_transactions,
 		applications, environments, secrets, secret_versions, file_bindings,
 		drafts, draft_selections, bundle_revisions, revision_files,
 		nodes, node_groups, group_members, assignments, enrollment_tokens

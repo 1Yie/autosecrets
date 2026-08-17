@@ -43,15 +43,38 @@ func DecodeCursor(value string) (Cursor, error) {
 	return Cursor{At: time.Unix(0, nanos).UTC(), ID: parts[1]}, nil
 }
 
-// ListApplicationsPage returns cursor-paginated Applications ordered by
-// created_at DESC, id DESC.
-func (s *Store) ListApplicationsPage(ctx context.Context, cursor Cursor, limit int) ([]Application, string, error) {
+func clampLimit(limit int) int {
 	if limit <= 0 || limit > 100 {
-		limit = 25
+		return 25
+	}
+	return limit
+}
+
+func useOffset(cursor Cursor, page int) bool {
+	return page > 1 && cursor.ID == ""
+}
+
+func pageOffset(page, limit int) int {
+	if page <= 1 {
+		return 0
+	}
+	return (page - 1) * limit
+}
+
+// ListApplicationsPage returns paginated Applications ordered by
+// created_at DESC, id DESC. page is 1-based; values above 1 use offset.
+func (s *Store) ListApplicationsPage(ctx context.Context, cursor Cursor, limit, page int) ([]Application, string, int64, error) {
+	limit = clampLimit(limit)
+	total, err := s.q.CountApplications(ctx)
+	if err != nil {
+		return nil, "", 0, err
 	}
 	var rows []gen.Application
-	var err error
-	if cursor.ID == "" {
+	if useOffset(cursor, page) {
+		rows, err = s.q.ListApplicationsOffsetPage(ctx, gen.ListApplicationsOffsetPageParams{
+			Limit: int32(limit + 1), Offset: int32(pageOffset(page, limit)),
+		})
+	} else if cursor.ID == "" {
 		rows, err = s.q.ListApplicationsFirstPage(ctx, int32(limit+1))
 	} else {
 		rows, err = s.q.ListApplicationsNextPage(ctx, gen.ListApplicationsNextPageParams{
@@ -59,28 +82,41 @@ func (s *Store) ListApplicationsPage(ctx context.Context, cursor Cursor, limit i
 		})
 	}
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	out := make([]Application, len(rows))
 	for i, r := range rows {
 		out[i] = Application(r)
 	}
-	return trimPage(out, limit, func(a Application) (time.Time, string) {
+	items, next, err := trimPage(out, limit, func(a Application) (time.Time, string) {
 		return a.CreatedAt, a.ID
 	})
+	return items, next, total, err
 }
 
-// ListNodeGroupsPage returns cursor-paginated Node Groups ordered by
+// ListNodeGroupsPage returns paginated Node Groups ordered by
 // created_at DESC, id DESC.
-func (s *Store) ListNodeGroupsPage(ctx context.Context, cursor Cursor, limit int) ([]NodeGroup, string, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 25
+func (s *Store) ListNodeGroupsPage(ctx context.Context, cursor Cursor, limit, page int) ([]NodeGroup, string, int64, error) {
+	limit = clampLimit(limit)
+	total, err := s.q.CountNodeGroups(ctx)
+	if err != nil {
+		return nil, "", 0, err
 	}
 	out := []NodeGroup{}
-	if cursor.ID == "" {
+	if useOffset(cursor, page) {
+		rows, err := s.q.ListNodeGroupsOffsetPage(ctx, gen.ListNodeGroupsOffsetPageParams{
+			Limit: int32(limit + 1), Offset: int32(pageOffset(page, limit)),
+		})
+		if err != nil {
+			return nil, "", 0, err
+		}
+		for _, r := range rows {
+			out = append(out, NodeGroup{ID: r.ID, Name: r.Name, CreatedAt: r.CreatedAt, MemberIDs: r.MemberIds})
+		}
+	} else if cursor.ID == "" {
 		rows, err := s.q.ListNodeGroupsFirstPage(ctx, int32(limit+1))
 		if err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		for _, r := range rows {
 			out = append(out, NodeGroup{ID: r.ID, Name: r.Name, CreatedAt: r.CreatedAt, MemberIDs: r.MemberIds})
@@ -90,28 +126,41 @@ func (s *Store) ListNodeGroupsPage(ctx context.Context, cursor Cursor, limit int
 			CreatedAt: cursor.At, ID: cursor.ID, Limit: int32(limit + 1),
 		})
 		if err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		for _, r := range rows {
 			out = append(out, NodeGroup{ID: r.ID, Name: r.Name, CreatedAt: r.CreatedAt, MemberIDs: r.MemberIds})
 		}
 	}
-	return trimPage(out, limit, func(g NodeGroup) (time.Time, string) {
+	items, next, err := trimPage(out, limit, func(g NodeGroup) (time.Time, string) {
 		return g.CreatedAt, g.ID
 	})
+	return items, next, total, err
 }
 
-// ListAssignmentsPage returns cursor-paginated Assignments ordered by
+// ListAssignmentsPage returns paginated Assignments ordered by
 // created_at DESC, id DESC.
-func (s *Store) ListAssignmentsPage(ctx context.Context, cursor Cursor, limit int) ([]Assignment, string, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 25
+func (s *Store) ListAssignmentsPage(ctx context.Context, cursor Cursor, limit, page int) ([]Assignment, string, int64, error) {
+	limit = clampLimit(limit)
+	total, err := s.q.CountAssignments(ctx)
+	if err != nil {
+		return nil, "", 0, err
 	}
 	out := []Assignment{}
-	if cursor.ID == "" {
+	if useOffset(cursor, page) {
+		rows, err := s.q.ListAssignmentsOffsetPage(ctx, gen.ListAssignmentsOffsetPageParams{
+			Limit: int32(limit + 1), Offset: int32(pageOffset(page, limit)),
+		})
+		if err != nil {
+			return nil, "", 0, err
+		}
+		for _, r := range rows {
+			out = append(out, assignmentFromRow(r.ID, r.GroupID, r.Name, r.ApplicationID, r.EnvironmentID, r.RevisionID, r.Status, r.CreatedAt))
+		}
+	} else if cursor.ID == "" {
 		rows, err := s.q.ListAssignmentsFirstPage(ctx, int32(limit+1))
 		if err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		for _, r := range rows {
 			out = append(out, assignmentFromRow(r.ID, r.GroupID, r.Name, r.ApplicationID, r.EnvironmentID, r.RevisionID, r.Status, r.CreatedAt))
@@ -121,16 +170,17 @@ func (s *Store) ListAssignmentsPage(ctx context.Context, cursor Cursor, limit in
 			CreatedAt: cursor.At, ID: cursor.ID, Limit: int32(limit + 1),
 		})
 		if err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		for _, r := range rows {
 			out = append(out, assignmentFromRow(r.ID, r.GroupID, r.Name, r.ApplicationID, r.EnvironmentID, r.RevisionID, r.Status, r.CreatedAt))
 		}
 	}
-	return trimPage(out, limit, func(a Assignment) (time.Time, string) {
+	items, next, err := trimPage(out, limit, func(a Assignment) (time.Time, string) {
 		at, _ := time.Parse(time.RFC3339, a.CreatedAt)
 		return at, a.ID
 	})
+	return items, next, total, err
 }
 
 func assignmentFromRow(id, groupID, groupName, appID, envID, revisionID, status string, createdAt time.Time) Assignment {

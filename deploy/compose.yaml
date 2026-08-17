@@ -17,7 +17,10 @@ services:
       retries: 10
 
   core:
-    build: ../core
+    build:
+      context: ../core
+      args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -34,6 +37,12 @@ services:
       CORE_OIDC_CLIENT_ID: ${CORE_OIDC_CLIENT_ID:-}
       CORE_OIDC_CLIENT_SECRET: ${CORE_OIDC_CLIENT_SECRET:-}
       CORE_OIDC_SCOPES: ${CORE_OIDC_SCOPES:-openid profile}
+      CORE_OAUTH_AUTHORIZATION_URL: ${CORE_OAUTH_AUTHORIZATION_URL:-}
+      CORE_OAUTH_TOKEN_URL: ${CORE_OAUTH_TOKEN_URL:-}
+      CORE_OAUTH_USERINFO_URL: ${CORE_OAUTH_USERINFO_URL:-}
+      CORE_OAUTH_CLIENT_ID: ${CORE_OAUTH_CLIENT_ID:-}
+      CORE_OAUTH_CLIENT_SECRET: ${CORE_OAUTH_CLIENT_SECRET:-}
+      CORE_OAUTH_SCOPES: ${CORE_OAUTH_SCOPES:-profile}
       CORE_ARTIFACT_DIR: ${CORE_ARTIFACT_DIR:-/artifacts}
     volumes:
       - keys:/keys

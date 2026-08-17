@@ -67,7 +67,6 @@ type Environment struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	ApplicationID string `json:"application_id"`
-	Protection    string `json:"protection"`
 }
 
 func (s *Store) ListEnvironments(ctx context.Context, appID string) ([]Environment, error) {
@@ -77,14 +76,14 @@ func (s *Store) ListEnvironments(ctx context.Context, appID string) ([]Environme
 	}
 	out := make([]Environment, len(rows))
 	for i, r := range rows {
-		out[i] = Environment{ID: r.ID, Name: r.Name, ApplicationID: r.ApplicationID, Protection: r.ProtectionLevel}
+		out[i] = Environment{ID: r.ID, Name: r.Name, ApplicationID: r.ApplicationID}
 	}
 	return out, nil
 }
 
-func (s *Store) CreateEnvironment(ctx context.Context, id, appID, name, protection string) error {
+func (s *Store) CreateEnvironment(ctx context.Context, id, appID, name string) error {
 	err := s.q.CreateEnvironment(ctx, gen.CreateEnvironmentParams{
-		ID: id, ApplicationID: appID, Name: name, ProtectionLevel: protection,
+		ID: id, ApplicationID: appID, Name: name, ProtectionLevel: "standard",
 	})
 	if isUniqueViolation(err) {
 		return ErrDuplicate
@@ -97,7 +96,92 @@ func (s *Store) GetEnvironment(ctx context.Context, envID, appID string) (*Envir
 	if err != nil {
 		return nil, mapNoRows(err)
 	}
-	return &Environment{ID: r.ID, Name: r.Name, ApplicationID: r.ApplicationID, Protection: r.ProtectionLevel}, nil
+	return &Environment{ID: r.ID, Name: r.Name, ApplicationID: r.ApplicationID}, nil
+}
+
+func (s *Store) DeleteApplication(ctx context.Context, id string) error {
+	count, err := s.q.CountActiveAssignmentsForApplication(ctx, id)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrConflict
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.DeleteRevisionFilesForApplication(ctx, id); err != nil {
+		return err
+	}
+	n, err := q.DeleteApplicationByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) DeleteEnvironment(ctx context.Context, envID, appID string) error {
+	count, err := s.q.CountActiveAssignmentsForEnvironment(ctx, gen.CountActiveAssignmentsForEnvironmentParams{
+		ApplicationID: appID, EnvironmentID: envID,
+	})
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrConflict
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.DeleteRevisionFilesForEnvironment(ctx, gen.DeleteRevisionFilesForEnvironmentParams{
+		ApplicationID: appID, EnvironmentID: envID,
+	}); err != nil {
+		return err
+	}
+	n, err := q.DeleteEnvironmentByID(ctx, gen.DeleteEnvironmentByIDParams{ID: envID, ApplicationID: appID})
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) DeleteSecret(ctx context.Context, secretID string) error {
+	count, err := s.q.CountActiveAssignmentsForSecret(ctx, secretID)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrConflict
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.DeleteRevisionFilesForSecret(ctx, secretID); err != nil {
+		return err
+	}
+	n, err := q.DeleteSecretByID(ctx, secretID)
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return tx.Commit(ctx)
 }
 
 // --- Secrets, versions, bindings, drafts, revisions -----------------------
@@ -506,6 +590,24 @@ func (s *Store) CreateNodeGroup(ctx context.Context, id, name string) error {
 	return err
 }
 
+func (s *Store) DeleteNodeGroup(ctx context.Context, id string) error {
+	count, err := s.q.CountActiveAssignmentsForNodeGroup(ctx, id)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return ErrConflict
+	}
+	n, err := s.q.DeleteNodeGroupByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) AddGroupMember(ctx context.Context, groupID, nodeID string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -620,15 +722,16 @@ func (s *Store) AdvanceDesiredRevision(ctx context.Context, appID, envID, revisi
 }
 
 type Node struct {
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	Serial           string     `json:"serial"`
-	AgePubkey        string     `json:"-"`
-	CreatedAt        time.Time  `json:"created_at"`
-	LastSeenAt       *time.Time `json:"last_seen_at"`
-	DesiredETag      string     `json:"desired_etag"`
-	ObservedRevision string     `json:"observed_revision"`
-	LastResult       string     `json:"last_result"`
+	ID                  string     `json:"id"`
+	Name                string     `json:"name"`
+	Serial              string     `json:"serial"`
+	AgePubkey           string     `json:"-"`
+	CreatedAt           time.Time  `json:"created_at"`
+	LastSeenAt          *time.Time `json:"last_seen_at"`
+	DesiredETag         string     `json:"desired_etag"`
+	ObservedRevision    string     `json:"observed_revision"`
+	LastResult          string     `json:"last_result"`
+	PollIntervalSeconds int        `json:"poll_interval_seconds"`
 }
 
 func (s *Store) ListNode(ctx context.Context) ([]Node, error) {
@@ -642,6 +745,7 @@ func (s *Store) ListNode(ctx context.Context) ([]Node, error) {
 			ID: r.ID, Name: r.Name, Serial: r.Serial, CreatedAt: r.CreatedAt,
 			LastSeenAt: tsPtr(r.LastSeenAt), DesiredETag: r.DesiredEtag,
 			ObservedRevision: r.ObservedRevision, LastResult: r.LastResult,
+			PollIntervalSeconds: int(r.PollIntervalSeconds),
 		}
 	}
 	return out, nil
@@ -656,6 +760,7 @@ func (s *Store) NodeBySerial(ctx context.Context, serial string) (*Node, error) 
 		ID: r.ID, Name: r.Name, Serial: r.Serial, AgePubkey: r.AgePubkey, CreatedAt: r.CreatedAt,
 		LastSeenAt: tsPtr(r.LastSeenAt), DesiredETag: r.DesiredEtag,
 		ObservedRevision: r.ObservedRevision, LastResult: r.LastResult,
+		PollIntervalSeconds: int(r.PollIntervalSeconds),
 	}, nil
 }
 
@@ -667,6 +772,21 @@ func (s *Store) TouchNode(ctx context.Context, nodeID string, observedRevision, 
 
 func (s *Store) SetNodeDesired(ctx context.Context, nodeID, etag string) error {
 	return s.q.SetNodeDesired(ctx, gen.SetNodeDesiredParams{ID: nodeID, DesiredEtag: etag})
+}
+
+// SetNodePollInterval persists the Agent polling interval (in seconds) for
+// one Managed Node; it reports ErrNotFound for unknown node IDs.
+func (s *Store) SetNodePollInterval(ctx context.Context, nodeID string, seconds int) error {
+	rows, err := s.q.SetNodePollInterval(ctx, gen.SetNodePollIntervalParams{
+		ID: nodeID, PollIntervalSeconds: int32(seconds),
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // --- Enrollment tokens -----------------------------------------------------

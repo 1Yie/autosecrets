@@ -16,15 +16,21 @@ export function useBootstrap() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (body: BootstrapForm) => {
-      const result = await apiPost<BootstrapResponse>(API_PATHS.bootstrap, body);
+      const result = await apiPost<BootstrapResponse>(
+        API_PATHS.bootstrap,
+        body,
+      );
       useSessionStore.getState().setCsrfToken(result.csrf_token);
       return result;
     },
-    onSuccess: (result, body) => {
+    onSuccess: (result) => {
       client.setQueryData<Me>(["me"], {
         bootstrap_required: false,
-        organization: { display_name: body.organization_name },
-        member: { id: result.id, username: result.username, role: "administrator" },
+        member: {
+          id: result.id,
+          username: result.username,
+          role: "administrator",
+        },
         csrf_token: result.csrf_token,
         session_expires_at: result.expires_at,
         idle_expires_at: result.expires_at,

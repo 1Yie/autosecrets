@@ -22,19 +22,22 @@ import (
 // validates requests, delegates to the Service, and maps domain/store errors
 // onto the unified error envelope. It owns no business rules.
 type Handler struct {
-	svc             *Service
-	base            string
-	oidc            *OIDCClient
-	oidcUnavailable string
-	loginFailures   authFailureLimiter
-	factorFailures  authFailureLimiter
-	publicURL       string
-	trustedProxies  []*net.IPNet
+	svc              *Service
+	base             string
+	oidc             *OIDCClient
+	oidcUnavailable  string
+	oauth            *OAuthClient
+	oauthUnavailable string
+	loginFailures    authFailureLimiter
+	factorFailures   authFailureLimiter
+	publicURL        string
+	trustedProxies   []*net.IPNet
 }
 
 const (
 	loginChallengeCookie = "autosecrets_login_challenge"
 	oidcStateCookie      = "autosecrets_oidc_state"
+	oauthStateCookie     = "autosecrets_oauth_state"
 )
 
 func NewHandler(svc *Service, publicURL string, trustedProxies []*net.IPNet) *Handler {
@@ -44,6 +47,11 @@ func NewHandler(svc *Service, publicURL string, trustedProxies []*net.IPNet) *Ha
 func (h *Handler) ConfigureOIDC(client *OIDCClient, unavailable string) {
 	h.oidc = client
 	h.oidcUnavailable = unavailable
+}
+
+func (h *Handler) ConfigureOAuth(client *OAuthClient, unavailable string) {
+	h.oauth = client
+	h.oauthUnavailable = unavailable
 }
 
 // Register mounts the identity routes: the public bootstrap/login/MFA flow
@@ -59,13 +67,19 @@ func (h *Handler) Register(mux *http.ServeMux, base string, requireSession func(
 	mux.HandleFunc("GET "+base+"/auth/oidc/status", h.OIDCStatus)
 	mux.HandleFunc("GET "+base+"/auth/oidc/login", h.StartOIDCLogin)
 	mux.HandleFunc("GET "+base+"/auth/oidc/callback", h.OIDCCallback)
+	mux.HandleFunc("GET "+base+"/auth/oauth/status", h.OAuthStatus)
+	mux.HandleFunc("GET "+base+"/auth/oauth/login", h.StartOAuthLogin)
+	mux.HandleFunc("GET "+base+"/auth/oauth/callback", h.OAuthCallback)
 	mux.Handle("GET "+base+"/auth/security", requireSession(http.HandlerFunc(h.SecurityStatus)))
 	mux.Handle("POST "+base+"/auth/oidc/binding", requireSession(http.HandlerFunc(h.StartOIDCBinding)))
 	mux.Handle("DELETE "+base+"/auth/oidc/binding", requireSession(http.HandlerFunc(h.UnbindOIDC)))
+	mux.Handle("POST "+base+"/auth/oauth/binding", requireSession(http.HandlerFunc(h.StartOAuthBinding)))
+	mux.Handle("DELETE "+base+"/auth/oauth/binding", requireSession(http.HandlerFunc(h.UnbindOAuth)))
 	mux.Handle("DELETE "+base+"/auth/totp", requireSession(http.HandlerFunc(h.DisableTOTP)))
 	mux.Handle("POST "+base+"/auth/logout", requireSession(http.HandlerFunc(h.Logout)))
 	mux.Handle("POST "+base+"/auth/renew", requireSession(http.HandlerFunc(h.SessionRenewal)))
 	mux.Handle("POST "+base+"/auth/step-up", requireSession(http.HandlerFunc(h.StepUp)))
+	mux.Handle("POST "+base+"/auth/username", requireSession(http.HandlerFunc(h.UsernameChange)))
 	mux.Handle("POST "+base+"/auth/password", requireSession(http.HandlerFunc(h.PasswordChange)))
 	mux.HandleFunc("GET "+base+"/me", h.Me)
 }
@@ -77,19 +91,61 @@ func (h *Handler) setOIDCState(w http.ResponseWriter, r *http.Request, value str
 	})
 }
 
+func (h *Handler) setOAuthState(w http.ResponseWriter, r *http.Request, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name: oauthStateCookie, Value: value, Path: h.base + "/auth/oauth/callback",
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: h.secureCookies(r), MaxAge: maxAge,
+	})
+}
+
 func (h *Handler) oidcAvailable() bool { return h.oidc != nil }
+
+func (h *Handler) oauthAvailable() bool { return h.oauth != nil }
 
 func (h *Handler) binding(ctx context.Context) (*database.ExternalIdentityBinding, bool) {
 	binding, err := h.svc.repo.ExternalIdentityBinding(ctx)
 	return binding, err == nil
 }
 
+func (h *Handler) oauthBinding(ctx context.Context) (*database.ExternalIdentityBinding, bool) {
+	binding, err := h.svc.repo.OAuthIdentityBinding(ctx)
+	return binding, err == nil
+}
+
+func publicProviderStatus(available, bound bool) map[string]bool {
+	return map[string]bool{
+		"available": available, "bound": bound, "login_available": available && bound,
+	}
+}
+
+func securityProviderStatus(available, bound bool, unavailable string, binding *database.ExternalIdentityBinding) map[string]any {
+	status := map[string]any{"available": available, "bound": bound}
+	if unavailable != "" {
+		status["configuration_error"] = unavailable
+	}
+	if bound && binding != nil {
+		status["issuer"] = binding.Issuer
+		status["display_name"] = binding.DisplayName
+	}
+	return status
+}
+
 func (h *Handler) OIDCStatus(w http.ResponseWriter, r *http.Request) {
-	_, bound := h.binding(r.Context())
-	middleware.WriteJSON(w, http.StatusOK, map[string]bool{
-		"available": h.oidcAvailable(), "bound": bound,
-		"login_available": h.oidcAvailable() && bound,
+	_, oidcBound := h.binding(r.Context())
+	_, oauthBound := h.oauthBinding(r.Context())
+	oidc := publicProviderStatus(h.oidcAvailable(), oidcBound)
+	oauth := publicProviderStatus(h.oauthAvailable(), oauthBound)
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{
+		"available": oidc["available"], "bound": oidc["bound"],
+		"login_available": oidc["login_available"],
+		"oidc":            oidc,
+		"oauth":           oauth,
 	})
+}
+
+func (h *Handler) OAuthStatus(w http.ResponseWriter, r *http.Request) {
+	_, bound := h.oauthBinding(r.Context())
+	middleware.WriteJSON(w, http.StatusOK, publicProviderStatus(h.oauthAvailable(), bound))
 }
 
 func (h *Handler) SecurityStatus(w http.ResponseWriter, r *http.Request) {
@@ -99,16 +155,11 @@ func (h *Handler) SecurityStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	binding, bound := h.binding(r.Context())
-	oidc := map[string]any{"available": h.oidcAvailable(), "bound": bound}
-	if h.oidcUnavailable != "" {
-		oidc["configuration_error"] = h.oidcUnavailable
-	}
-	if bound {
-		oidc["issuer"] = binding.Issuer
-		oidc["display_name"] = binding.DisplayName
-	}
+	oauthBinding, oauthBound := h.oauthBinding(r.Context())
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{
-		"totp_login_required": organization.TOTPLoginRequired, "oidc": oidc,
+		"totp_login_required": organization.TOTPLoginRequired,
+		"oidc":                securityProviderStatus(h.oidcAvailable(), bound, h.oidcUnavailable, binding),
+		"oauth":               securityProviderStatus(h.oauthAvailable(), oauthBound, h.oauthUnavailable, oauthBinding),
 	})
 }
 
@@ -227,6 +278,121 @@ func (h *Handler) UnbindOIDC(w http.ResponseWriter, r *http.Request) {
 	middleware.WriteJSON(w, http.StatusOK, map[string]bool{"bound": false})
 }
 
+func (h *Handler) StartOAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if !h.oauthAvailable() {
+		middleware.WriteError(w, http.StatusServiceUnavailable, middleware.CodeUnavailable, "OAuth login unavailable")
+		return
+	}
+	start, err := h.svc.StartOAuthLogin(h.withContext(r), validReturnTo(r.URL.Query().Get("return_to")))
+	if err != nil {
+		middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login unavailable")
+		return
+	}
+	h.setOAuthState(w, r, start.State, int(oidcTransactionTTL/time.Second))
+	http.Redirect(w, r, h.oauth.AuthorizationURL(h.base, start.State, start.Verifier), http.StatusFound)
+}
+
+func (h *Handler) StartOAuthBinding(w http.ResponseWriter, r *http.Request) {
+	if !h.oauthAvailable() {
+		middleware.WriteError(w, http.StatusServiceUnavailable, middleware.CodeUnavailable, "OAuth unavailable")
+		return
+	}
+	session := middleware.SessionFrom(r)
+	var body struct {
+		Password string `json:"password"`
+		TOTPCode string `json:"totp_code"`
+		ReturnTo string `json:"return_to"`
+	}
+	if session == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+		middleware.WriteError(w, http.StatusBadRequest, middleware.CodeBadRequest, "invalid binding request")
+		return
+	}
+	start, err := h.svc.StartOAuthBinding(h.withContext(r), session.AdminID, body.Password, body.TOTPCode, validReturnTo(body.ReturnTo))
+	if err != nil {
+		if errors.Is(err, database.ErrConflict) {
+			middleware.WriteError(w, http.StatusConflict, middleware.CodeConflict, "external identity is already bound")
+		} else {
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
+		}
+		return
+	}
+	h.setOAuthState(w, r, start.State, int(oidcTransactionTTL/time.Second))
+	middleware.WriteJSON(w, http.StatusOK, map[string]string{
+		"authorization_url": h.oauth.AuthorizationURL(h.base, start.State, start.Verifier),
+	})
+}
+
+func (h *Handler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
+	ctx := h.withContext(r)
+	h.setOAuthState(w, r, "", -1)
+	if !h.oauthAvailable() || r.URL.Query().Get("error") != "" || r.URL.Query().Get("code") == "" {
+		h.svc.AuditOAuthCallbackDenied(ctx, "", "")
+		middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+		return
+	}
+	state := r.URL.Query().Get("state")
+	cookie, err := r.Cookie(oauthStateCookie)
+	if err != nil || state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(cookie.Value)) != 1 {
+		h.svc.AuditOAuthCallbackDenied(ctx, "", "")
+		middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+		return
+	}
+	transaction, err := h.svc.ConsumeOIDCTransaction(ctx, state)
+	if err != nil {
+		h.svc.AuditOAuthCallbackDenied(ctx, "", "")
+		middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+		return
+	}
+	identity, err := h.oauth.ExchangeAndIdentify(r.Context(), h.base, r.URL.Query().Get("code"), transaction.PKCEVerifier)
+	if err != nil {
+		h.svc.AuditOAuthCallbackDenied(ctx, transaction.Purpose, transaction.MemberID)
+		middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+		return
+	}
+	if transaction.Purpose == "bind" {
+		session, ok := h.sessionFromRequest(r)
+		if !ok || session.AdminID != transaction.MemberID {
+			h.svc.AuditOAuthCallbackDenied(ctx, transaction.Purpose, transaction.MemberID)
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+			return
+		}
+		if h.svc.CompleteOAuthBinding(ctx, transaction, identity, session.SessionIDHash) != nil {
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+			return
+		}
+	} else {
+		session, err := h.svc.CompleteOAuthLogin(ctx, transaction, identity)
+		if err != nil {
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "external login failed")
+			return
+		}
+		h.setSessionCookie(w, r, session)
+	}
+	http.Redirect(w, r, transaction.ReturnTo, http.StatusFound)
+}
+
+func (h *Handler) UnbindOAuth(w http.ResponseWriter, r *http.Request) {
+	session := middleware.SessionFrom(r)
+	var body struct {
+		Password string `json:"password"`
+		TOTPCode string `json:"totp_code"`
+	}
+	if session == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+		middleware.WriteError(w, http.StatusBadRequest, middleware.CodeBadRequest, "invalid unbind request")
+		return
+	}
+	err := h.svc.UnbindOAuth(h.withContext(r), session.AdminID, session.SessionIDHash, body.Password, body.TOTPCode)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			middleware.WriteError(w, http.StatusNotFound, middleware.CodeNotFound, "external identity binding not found")
+		} else {
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
+		}
+		return
+	}
+	middleware.WriteJSON(w, http.StatusOK, map[string]bool{"bound": false})
+}
+
 func validReturnTo(value string) string {
 	const fallback = "/dashboard/overview"
 	if value == "" || strings.HasPrefix(value, "//") || strings.ContainsAny(value, "\\\r\n") {
@@ -331,6 +497,9 @@ func (h *Handler) Bootstrap(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		middleware.WriteError(w, http.StatusBadRequest, middleware.CodeBadRequest, "invalid JSON")
 		return
+	}
+	if strings.TrimSpace(body.OrganizationName) == "" {
+		body.OrganizationName = "AutoSecrets"
 	}
 	out, err := h.svc.Bootstrap(ctx, body.Code, body.OrganizationName, body.Username, body.Password)
 	if err != nil {
@@ -598,6 +767,33 @@ func (h *Handler) StepUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	middleware.WriteJSON(w, http.StatusOK, map[string]string{"expires_at": timeString(expiresAt)})
+}
+
+func (h *Handler) UsernameChange(w http.ResponseWriter, r *http.Request) {
+	ctx := h.withContext(r)
+	session := middleware.SessionFrom(r)
+	var body struct {
+		Username        string `json:"username"`
+		CurrentPassword string `json:"current_password"`
+		TOTPCode        string `json:"totp_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || session == nil {
+		middleware.WriteError(w, http.StatusBadRequest, middleware.CodeBadRequest, "invalid username change")
+		return
+	}
+	newSession, err := h.svc.ChangeUsername(ctx, session.AdminID, body.Username, body.CurrentPassword, body.TOTPCode)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
+		case errors.Is(err, database.ErrDuplicate):
+			middleware.WriteError(w, http.StatusConflict, middleware.CodeDuplicate, "username already taken")
+		default:
+			middleware.WriteError(w, http.StatusInternalServerError, middleware.CodeInternal, "internal error")
+		}
+		return
+	}
+	h.writeSession(w, r, newSession)
 }
 
 func (h *Handler) PasswordChange(w http.ResponseWriter, r *http.Request) {

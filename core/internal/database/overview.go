@@ -72,15 +72,5 @@ func (s *Store) OverviewAttention(ctx context.Context) ([]AttentionFact, error) 
 	if cleanup.CleanupFailed > 0 {
 		facts = append(facts, AttentionFact{Kind: "cleanup_failed", Count: int(cleanup.CleanupFailed)})
 	}
-
-	envs, err := q.UnclassifiedEnvironments(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range envs {
-		facts = append(facts, AttentionFact{
-			Kind: "unclassified_environment", Count: 1, Resource: e.ID,
-		})
-	}
 	return facts, nil
 }

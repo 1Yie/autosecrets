@@ -58,7 +58,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [code, organization_name, username, password]
+              required: [code, username, password]
               properties:
                 code:
                   type: string
@@ -68,6 +68,9 @@ paths:
                   type: string
                   minLength: 1
                   maxLength: 128
+                  description: >-
+                    Optional; defaults to AutoSecrets. The name is stored for
+                    audit display only and is not shown in the Web console.
                 username:
                   type: string
                   pattern: "^[a-zA-Z0-9._-]{2,64}$"
@@ -127,7 +130,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "202":
-          description: Password accepted; a short-lived second-factor challenge was issued
+          description: >-
+            Password accepted; a short-lived second-factor challenge was issued
           headers:
             Set-Cookie:
               description: autosecrets_login_challenge (HttpOnly, SameSite=Lax)
@@ -311,7 +315,9 @@ paths:
     post:
       operationId: renewSession
       tags: [Identity]
-      summary: Replace the current Session after proof required by the local TOTP policy
+      summary: >-
+        Replace the current Session after proof required by the local TOTP
+        policy
       requestBody:
         required: true
         content:
@@ -335,7 +341,8 @@ paths:
     post:
       operationId: stepUpAuthentication
       tags: [Identity]
-      summary: Issue a short-lived grant after proof required by the local TOTP policy
+      summary: >-
+        Issue a short-lived grant after proof required by the local TOTP policy
       requestBody:
         required: true
         content:
@@ -360,11 +367,52 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+  /api/v1/auth/username:
+    post:
+      operationId: changeUsername
+      tags: [Identity]
+      summary: >-
+        Change Username after current password and TOTP when the local policy
+        requires it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, current_password]
+              properties:
+                username:
+                  type: string
+                  minLength: 2
+                  maxLength: 64
+                  pattern: "^[a-zA-Z0-9._-]+$"
+                current_password:
+                  type: string
+                totp_code:
+                  type: string
+      responses:
+        "200":
+          description: Username changed and current browser Session reissued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Duplicate"
   /api/v1/auth/password:
     post:
       operationId: changePassword
       tags: [Identity]
-      summary: Change password after current password and TOTP when the local policy requires it
+      summary: >-
+        Change password after current password and TOTP when the local policy
+        requires it
       requestBody:
         required: true
         content:
@@ -420,7 +468,8 @@ paths:
             type: string
       responses:
         "302":
-          description: Redirect to the discovered Provider authorization endpoint
+          description: >-
+            Redirect to the discovered Provider authorization endpoint
           headers:
             Location:
               schema:
@@ -455,13 +504,90 @@ paths:
             type: string
       responses:
         "302":
-          description: OIDC transaction completed and redirected to a validated local path
+          description: >-
+            OIDC transaction completed and redirected to a validated local path
           headers:
             Location:
               schema:
                 type: string
             Set-Cookie:
-              description: Expired state cookie and, for login, the AutoSecrets Session
+              description: >-
+                Expired state cookie and, for login, the AutoSecrets Session
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/oauth/status:
+    get:
+      operationId: getOAuthStatus
+      tags: [Identity]
+      summary: Minimal anonymous OAuth availability and binding state
+      security: []
+      responses:
+        "200":
+          description: OAuth availability without operational diagnostics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExternalProviderPublicStatus"
+  /api/v1/auth/oauth/login:
+    get:
+      operationId: startOAuthLogin
+      tags: [Identity]
+      summary: Start an anonymous OAuth authorization-code transaction
+      security: []
+      parameters:
+        - name: return_to
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: >-
+            Redirect to the configured OAuth authorization endpoint
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+            Set-Cookie:
+              description: Short-lived autosecrets_oauth_state cookie
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/auth/oauth/callback:
+    get:
+      operationId: completeOAuthTransaction
+      tags: [Identity]
+      summary: Exchange the authorization code and complete login or binding
+      security: []
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+        - name: error
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: >-
+            OAuth transaction completed and redirected to a validated local path
+          headers:
+            Location:
+              schema:
+                type: string
+            Set-Cookie:
+              description: >-
+                Expired state cookie and, for login, the AutoSecrets Session
               schema:
                 type: string
         "401":
@@ -470,7 +596,8 @@ paths:
     get:
       operationId: getAuthenticationSecurity
       tags: [Identity]
-      summary: Authenticated local TOTP policy and OIDC binding/configuration state
+      summary: >-
+        Authenticated local TOTP policy and External Identity binding state
       responses:
         "200":
           description: Sanitized authentication security state
@@ -484,7 +611,9 @@ paths:
     post:
       operationId: startOIDCBinding
       tags: [Identity]
-      summary: Re-authenticate locally and start an External Identity Binding transaction
+      summary: >-
+        Re-authenticate locally and start an External Identity Binding
+        transaction
       requestBody:
         required: true
         content:
@@ -513,6 +642,64 @@ paths:
       operationId: deleteOIDCBinding
       tags: [Identity]
       summary: Re-authenticate locally and remove the External Identity Binding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCBindingProof"
+      responses:
+        "200":
+          description: External Identity Binding removed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [bound]
+                properties:
+                  bound:
+                    type: boolean
+                    enum: [false]
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/auth/oauth/binding:
+    post:
+      operationId: startOAuthBinding
+      tags: [Identity]
+      summary: >-
+        Re-authenticate locally and start an OAuth External Identity Binding
+        transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OIDCBindingProof"
+      responses:
+        "200":
+          description: Provider authorization URL for the binding transaction
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorization_url]
+                properties:
+                  authorization_url:
+                    type: string
+                    format: uri
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      operationId: deleteOAuthBinding
+      tags: [Identity]
+      summary: >-
+        Re-authenticate locally and remove the OAuth External Identity Binding
       requestBody:
         required: true
         content:
@@ -578,6 +765,10 @@ paths:
       operationId: listApplications
       tags: [Authoring]
       summary: List Applications (cursor paginated)
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageNumber"
       responses:
         "200":
           description: Applications newest first
@@ -643,11 +834,28 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteApplication
+      tags: [Authoring]
+      summary: Delete an Application that has no active Assignments
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+      responses:
+        "204":
+          description: Application deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/applications/{appID}/environments:
     post:
       operationId: createEnvironment
       tags: [Authoring]
-      summary: Create an explicitly classified Environment inside an Application
+      summary: Create an Environment inside an Application
       parameters:
         - $ref: "#/components/parameters/AppID"
       requestBody:
@@ -656,16 +864,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name, protection]
+              required: [name]
               properties:
                 name:
                   type: string
-                protection:
-                  type: string
-                  enum: [standard, protected]
-                  description: >-
-                    Explicit classification; never inferred from the name
-                  maxLength: 64
       responses:
         "403":
           $ref: "#/components/responses/Forbidden"
@@ -681,6 +883,25 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Duplicate"
+  /api/v1/applications/{appID}/environments/{envID}:
+    delete:
+      operationId: deleteEnvironment
+      tags: [Authoring]
+      summary: Delete an Environment that has no active Assignments
+      parameters:
+        - $ref: "#/components/parameters/AppID"
+        - $ref: "#/components/parameters/EnvID"
+      responses:
+        "204":
+          description: Environment deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/applications/{appID}/environments/{envID}/secrets:
     get:
       operationId: listSecrets
@@ -739,6 +960,24 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Duplicate"
+  /api/v1/secrets/{secretID}:
+    delete:
+      operationId: deleteSecret
+      tags: [Authoring]
+      summary: Delete a Secret that is not part of an active Assignment
+      parameters:
+        - $ref: "#/components/parameters/SecretID"
+      responses:
+        "204":
+          description: Secret deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/secrets/{secretID}/versions:
     post:
       operationId: createSecretVersion
@@ -912,7 +1151,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: []
               properties:
                 operation_reason:
                   $ref: "#/components/schemas/OperationReason"
@@ -986,6 +1224,10 @@ paths:
       operationId: listNodeGroups
       tags: [Fleet]
       summary: List Node Groups with members (cursor paginated)
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageNumber"
       responses:
         "200":
           description: Node Groups newest first
@@ -1023,6 +1265,24 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "409":
           $ref: "#/components/responses/Duplicate"
+  /api/v1/node-groups/{groupID}:
+    delete:
+      operationId: deleteNodeGroup
+      tags: [Fleet]
+      summary: Delete a Node Group that has no active Assignments
+      parameters:
+        - $ref: "#/components/parameters/GroupID"
+      responses:
+        "204":
+          description: Node Group deleted
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/node-groups/{groupID}/nodes:
     post:
       operationId: addGroupMember
@@ -1083,6 +1343,10 @@ paths:
       operationId: listAssignments
       tags: [Fleet]
       summary: List Assignments (cursor paginated)
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageNumber"
       responses:
         "200":
           description: Assignments newest first
@@ -1167,7 +1431,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: []
               properties:
                 operation_reason:
                   $ref: "#/components/schemas/OperationReason"
@@ -1212,7 +1475,6 @@ paths:
           application/json:
             schema:
               type: object
-              required: []
               properties:
                 operation_reason:
                   $ref: "#/components/schemas/OperationReason"
@@ -1301,6 +1563,10 @@ paths:
       operationId: listNodes
       tags: [Fleet]
       summary: List Managed Nodes and their convergence state (cursor paginated)
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageNumber"
       responses:
         "200":
           description: Nodes newest first
@@ -1310,6 +1576,46 @@ paths:
                 $ref: "#/components/schemas/NodePage"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /api/v1/nodes/{nodeID}:
+    patch:
+      operationId: updateNode
+      tags: [Fleet]
+      summary: Adjust a Managed Node's settings, such as its polling interval
+      parameters:
+        - $ref: "#/components/parameters/NodeID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [poll_interval_seconds]
+              properties:
+                poll_interval_seconds:
+                  type: integer
+                  minimum: 5
+                  maximum: 86400
+                  description: >-
+                    How often the Agent polls for Desired State (5s-24h); the
+                    Agent adopts it after its next heartbeat or desired poll.
+      responses:
+        "200":
+          description: Updated node settings
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, poll_interval_seconds]
+                properties:
+                  id:
+                    type: string
+                  poll_interval_seconds:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /api/v1/overview:
     get:
       operationId: overview
@@ -1393,6 +1699,13 @@ paths:
           description: Opaque keyset position from the previous page
           schema:
             type: string
+        - name: page
+          in: query
+          required: false
+          description: 1-based page number; used for jump-to-page
+          schema:
+            type: integer
+            minimum: 1
         - name: resource
           in: query
           required: false
@@ -1475,6 +1788,30 @@ paths:
           $ref: "#/components/responses/Unauthorized"
 components:
   parameters:
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      description: Page size (default 25, max 100)
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    PageCursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque keyset position from the previous page
+      schema:
+        type: string
+    PageNumber:
+      name: page
+      in: query
+      required: false
+      description: 1-based page number; used for jump-to-page
+      schema:
+        type: integer
+        minimum: 1
     AppID:
       name: appID
       in: path
@@ -1644,7 +1981,7 @@ components:
           type: string
         totp_uri:
           type: string
-    OIDCPublicStatus:
+    ExternalProviderPublicStatus:
       type: object
       required: [available, bound, login_available]
       properties:
@@ -1654,6 +1991,15 @@ components:
           type: boolean
         login_available:
           type: boolean
+    OIDCPublicStatus:
+      allOf:
+        - $ref: "#/components/schemas/ExternalProviderPublicStatus"
+        - type: object
+          properties:
+            oidc:
+              $ref: "#/components/schemas/ExternalProviderPublicStatus"
+            oauth:
+              $ref: "#/components/schemas/ExternalProviderPublicStatus"
     OIDCBindingProof:
       type: object
       required: [password]
@@ -1665,27 +2011,31 @@ components:
           pattern: "^[0-9]{6}$"
         return_to:
           type: string
+    ExternalProviderSecurity:
+      type: object
+      required: [available, bound]
+      properties:
+        available:
+          type: boolean
+        bound:
+          type: boolean
+        issuer:
+          type: string
+          format: uri
+        display_name:
+          type: string
+        configuration_error:
+          type: string
     AuthenticationSecurity:
       type: object
-      required: [totp_login_required, oidc]
+      required: [totp_login_required, oidc, oauth]
       properties:
         totp_login_required:
           type: boolean
         oidc:
-          type: object
-          required: [available, bound]
-          properties:
-            available:
-              type: boolean
-            bound:
-              type: boolean
-            issuer:
-              type: string
-              format: uri
-            display_name:
-              type: string
-            configuration_error:
-              type: string
+          $ref: "#/components/schemas/ExternalProviderSecurity"
+        oauth:
+          $ref: "#/components/schemas/ExternalProviderSecurity"
     LoginResponse:
       type: object
       required: [csrf_token, username, id, role, expires_at]
@@ -1785,7 +2135,7 @@ components:
           type: boolean
         auth_method:
           type: string
-          enum: [local, oidc]
+          enum: [local, oidc, oauth]
     Application:
       type: object
       required: [id, name, created_at]
@@ -1799,7 +2149,7 @@ components:
           format: date-time
     Environment:
       type: object
-      required: [id, name, application_id, protection]
+      required: [id, name, application_id]
       properties:
         id:
           type: string
@@ -1807,9 +2157,6 @@ components:
           type: string
         application_id:
           type: string
-        protection:
-          type: string
-          enum: [standard, protected, unclassified]
     Binding:
       type: object
       nullable: true
@@ -1994,6 +2341,7 @@ components:
         - last_result
         - state
         - unassigned
+        - poll_interval_seconds
       properties:
         id:
           type: string
@@ -2020,6 +2368,14 @@ components:
           description: Derived primary state (ADR-0015)
         unassigned:
           type: boolean
+        poll_interval_seconds:
+          type: integer
+          minimum: 5
+          maximum: 86400
+          description: >-
+            How often the Agent polls for Desired State; Core delivers it in
+            the desired/heartbeat responses and the Agent adopts it on its
+            next pass.
     Overview:
       type: object
       required:
@@ -2069,7 +2425,6 @@ components:
                   - failed_convergence
                   - offline_node
                   - unassigned_node
-                  - unclassified_environment
                   - cleanup_failed
                   - cleanup_unconfirmed
               count:
@@ -2162,6 +2517,9 @@ components:
         next_cursor:
           type: string
           description: Opaque keyset position; empty on the last page
+        total:
+          type: integer
+          description: Total matching rows
     NodeGroupPage:
       type: object
       required: [items, next_cursor]
@@ -2172,6 +2530,8 @@ components:
             $ref: "#/components/schemas/NodeGroup"
         next_cursor:
           type: string
+        total:
+          type: integer
     AssignmentPage:
       type: object
       required: [items, next_cursor]
@@ -2182,6 +2542,8 @@ components:
             $ref: "#/components/schemas/Assignment"
         next_cursor:
           type: string
+        total:
+          type: integer
     NodePage:
       type: object
       required: [items, next_cursor]
@@ -2192,6 +2554,8 @@ components:
             $ref: "#/components/schemas/Node"
         next_cursor:
           type: string
+        total:
+          type: integer
     AuditEventPage:
       type: object
       required: [items, next_cursor]
@@ -2202,6 +2566,8 @@ components:
             $ref: "#/components/schemas/AuditEvent"
         next_cursor:
           type: string
+        total:
+          type: integer
     Error:
       type: object
       required: [error, code]

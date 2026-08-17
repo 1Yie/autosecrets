@@ -96,6 +96,10 @@ _Avoid_: Cache, local truth, fallback copy
 The independent process by which each Managed Node attempts to activate its assigned Desired State while retaining its Last Known Good Revision on failure.
 _Avoid_: Global deployment, synchronization, all-or-nothing rollout
 
+**Poll Interval**:
+The per-node frequency at which the Agent polls Core for Desired State; Core advertises it in every heartbeat/desired response and the Agent adopts it on its next pass (5 seconds to 24 hours).
+_Avoid_: Sync frequency, update rate, refresh timer
+
 **Assignment Convergence**:
 The independently tracked progress of one Managed Node toward activating the Bundle Revision selected by one Assignment.
 _Avoid_: Node status, sync status, deployment status
@@ -161,12 +165,16 @@ The Organization-wide rule that determines whether local authentication requires
 _Avoid_: MFA preference, remember device, optional code
 
 **External Identity Provider**:
-An OpenID Connect provider that authenticates the Administrator outside AutoSecrets.
-_Avoid_: OAuth login, social login, SSO server
+An OpenID Connect provider or OAuth 2.0 authorization server that authenticates the Administrator outside AutoSecrets.
+_Avoid_: social login, SSO server
 
 **External Identity Binding**:
-The explicit association between the Administrator and one stable issuer-and-subject identity from the configured External Identity Provider.
+The explicit association between the Administrator and one stable issuer-and-subject identity from a configured External Identity Provider. OIDC and OAuth bindings are independent.
 _Avoid_: Email match, automatic account linking, OAuth account
+
+**OAuth Authorization Server**:
+An OAuth 2.0 authorization server that identifies the Administrator through a userinfo subject rather than an ID Token.
+_Avoid_: OpenID Connect provider, social login
 
 **Audit Event**:
 An immutable record of a security-relevant human, Core, or Agent action and its outcome that never contains Secret values.
@@ -195,3 +203,7 @@ _Avoid_: Database dump, volume snapshot, key backup
 **Administrator**:
 The single human identity allowed to access an Organization, change Desired State, and manage Managed Nodes.
 _Avoid_: Organization Member, Viewer, user, account, owner, operator, superuser
+
+**Username**:
+The Administrator's unique local login name; it is not the internal identity id and is not a display name.
+_Avoid_: user id, account name, login id, display name

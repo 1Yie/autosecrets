@@ -215,6 +215,7 @@ type AuditFilter struct {
 	From           time.Time
 	To             time.Time
 	Limit          int
+	Page           int
 }
 
 func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEvent, error) {
@@ -245,38 +246,77 @@ func (s *Store) ListAudit(ctx context.Context, f AuditFilter) ([]AuditEvent, err
 // ListAuditPage returns cursor-paginated structured Audit Events ordered by
 // id DESC with the documented filters (ADR-0020). The cursor is the last
 // visible event id.
-func (s *Store) ListAuditPage(ctx context.Context, f AuditFilter, afterID int64) ([]AuditEvent, string, error) {
+func (s *Store) ListAuditPage(ctx context.Context, f AuditFilter, afterID int64) ([]AuditEvent, string, int64, error) {
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 25
+	}
+	countParams := gen.CountAuditEventsParams{}
+	if f.Actor != "" {
+		countParams.Actor = &f.Actor
+	}
+	if f.Action != "" {
+		countParams.Action = &f.Action
+	}
+	if f.Resource != "" {
+		countParams.Resource = &f.Resource
+	}
+	if f.Outcome != "" {
+		countParams.Outcome = &f.Outcome
+	}
+	if f.ReasonCategory != "" {
+		countParams.ReasonCategory = &f.ReasonCategory
+	}
+	if !f.From.IsZero() {
+		countParams.From = pgtype.Timestamptz{Time: f.From, Valid: true}
+	}
+	if !f.To.IsZero() {
+		countParams.To = pgtype.Timestamptz{Time: f.To, Valid: true}
+	}
+	total, err := s.q.CountAuditEvents(ctx, countParams)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	var rows []gen.ListAuditPageRow
+	if f.Page > 1 && afterID == 0 {
+		offsetRows, err := s.q.ListAuditOffsetPage(ctx, gen.ListAuditOffsetPageParams{
+			Actor: countParams.Actor, Action: countParams.Action, Resource: countParams.Resource,
+			Outcome: countParams.Outcome, ReasonCategory: countParams.ReasonCategory,
+			From: countParams.From, To: countParams.To,
+			Offset: int32((f.Page - 1) * f.Limit), Limit: int32(f.Limit + 1),
+		})
+		if err != nil {
+			return nil, "", 0, err
+		}
+		out := make([]AuditEvent, len(offsetRows))
+		for i, r := range offsetRows {
+			out[i] = AuditEvent{
+				ID: r.ID, Actor: r.Actor, Action: r.Action, Resource: r.Resource,
+				Result: r.Result, CorrelationID: r.CorrelationID, CreatedAt: r.CreatedAt,
+				ActorType: r.ActorType, ActorID: r.ActorID, ActorDisplay: r.ActorDisplay,
+				ResourceType: r.ResourceType, ResourceID: r.ResourceID, ResourceDisplay: r.ResourceDisplay,
+				Outcome: r.Outcome, ReasonCategory: r.OperationReasonCategory,
+				ReasonExplanation: r.OperationReasonExplanation, ReasonExternalRef: r.OperationReasonExternalRef,
+			}
+		}
+		if len(out) <= f.Limit {
+			return out, "", total, nil
+		}
+		return out[:f.Limit], strconv.FormatInt(out[f.Limit].ID, 10), total, nil
 	}
 	params := gen.ListAuditPageParams{Limit: int32(f.Limit + 1)}
 	if afterID > 0 {
 		params.AfterID = &afterID
 	}
-	if f.Actor != "" {
-		params.Actor = &f.Actor
-	}
-	if f.Action != "" {
-		params.Action = &f.Action
-	}
-	if f.Resource != "" {
-		params.Resource = &f.Resource
-	}
-	if f.Outcome != "" {
-		params.Outcome = &f.Outcome
-	}
-	if f.ReasonCategory != "" {
-		params.ReasonCategory = &f.ReasonCategory
-	}
-	if !f.From.IsZero() {
-		params.From = pgtype.Timestamptz{Time: f.From, Valid: true}
-	}
-	if !f.To.IsZero() {
-		params.To = pgtype.Timestamptz{Time: f.To, Valid: true}
-	}
-	rows, err := s.q.ListAuditPage(ctx, params)
+	params.Actor = countParams.Actor
+	params.Action = countParams.Action
+	params.Resource = countParams.Resource
+	params.Outcome = countParams.Outcome
+	params.ReasonCategory = countParams.ReasonCategory
+	params.From = countParams.From
+	params.To = countParams.To
+	rows, err = s.q.ListAuditPage(ctx, params)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	out := make([]AuditEvent, len(rows))
 	for i, r := range rows {
@@ -290,9 +330,9 @@ func (s *Store) ListAuditPage(ctx context.Context, f AuditFilter, afterID int64)
 		}
 	}
 	if len(out) <= f.Limit {
-		return out, "", nil
+		return out, "", total, nil
 	}
-	return out[:f.Limit], strconv.FormatInt(out[f.Limit].ID, 10), nil
+	return out[:f.Limit], strconv.FormatInt(out[f.Limit].ID, 10), total, nil
 }
 
 // --- transactions ---------------------------------------------------------

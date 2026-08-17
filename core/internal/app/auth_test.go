@@ -49,6 +49,10 @@ func TestBootstrapLifecycle(t *testing.T) {
 	if meAfterBootstrap.status != http.StatusOK || meAfterBootstrap.body["member"] == nil {
 		t.Fatalf("bootstrap Session is not authenticated: %d %s", meAfterBootstrap.status, meAfterBootstrap.raw)
 	}
+	organization, hasOrg := meAfterBootstrap.body["organization"].(map[string]any)
+	if !hasOrg || organization["display_name"] != "Acme Platform" {
+		t.Fatalf("organization identity after bootstrap: %s", meAfterBootstrap.raw)
+	}
 	passwordLogin := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
 		"username": "admin", "password": "correct-horse-battery-42",
 	}, "", "")
@@ -65,6 +69,25 @@ func TestBootstrapLifecycle(t *testing.T) {
 	code2, _ := ta.app.EmitBootstrapCode(context.Background())
 	if code2 != "" {
 		t.Fatal("bootstrap code emitted after admin exists")
+	}
+}
+
+func TestBootstrapWithoutOrganizationNameDefaults(t *testing.T) {
+	ta := newTestApp(t)
+	code, err := ta.app.EmitBootstrapCode(context.Background())
+	if err != nil || code == "" {
+		t.Fatal(err)
+	}
+	ok := ta.do(t, "POST", "/api/v1/bootstrap", map[string]string{
+		"code": code, "username": "admin", "password": "correct-horse-battery-42",
+	}, "", "")
+	if ok.status != http.StatusCreated {
+		t.Fatalf("bootstrap without organization_name: %d %s", ok.status, ok.raw)
+	}
+	me := ta.do(t, "GET", "/api/v1/me", nil, sessionCookieFrom(t, ok), "")
+	organization, hasOrg := me.body["organization"].(map[string]any)
+	if !hasOrg || organization["display_name"] != "AutoSecrets" {
+		t.Fatalf("default organization name: %s", me.raw)
 	}
 }
 
@@ -203,7 +226,7 @@ func TestPasswordAndSecondFactorFailuresAreRateLimitedWithoutPermanentLockout(t 
 	if limited.status != http.StatusTooManyRequests || limited.body["code"] != "rate_limited" || limited.header.Get("Retry-After") == "" {
 		t.Fatalf("password attempts not limited: %d %s", limited.status, limited.raw)
 	}
-	events, _, err := ta.store.ListAuditPage(t.Context(), database.AuditFilter{Action: "auth.login", Limit: 100}, 0)
+	events, _, _, err := ta.store.ListAuditPage(t.Context(), database.AuditFilter{Action: "auth.login", Limit: 100}, 0)
 	if err != nil || !hasAuditResult(events, "rate_limited") {
 		t.Fatalf("password rate limit Audit Event: events=%v err=%v", events, err)
 	}
@@ -234,7 +257,7 @@ func TestPasswordAndSecondFactorFailuresAreRateLimitedWithoutPermanentLockout(t 
 	if limited.status != http.StatusTooManyRequests || limited.body["code"] != "rate_limited" {
 		t.Fatalf("factor attempts not limited: %d %s", limited.status, limited.raw)
 	}
-	events, _, err = ta.store.ListAuditPage(t.Context(), database.AuditFilter{Action: "auth.second_factor", Limit: 100}, 0)
+	events, _, _, err = ta.store.ListAuditPage(t.Context(), database.AuditFilter{Action: "auth.second_factor", Limit: 100}, 0)
 	if err != nil || !hasAuditResult(events, "rate_limited") {
 		t.Fatalf("factor rate limit Audit Event: events=%v err=%v", events, err)
 	}
@@ -367,6 +390,64 @@ func TestPasswordChangeRevokesOtherSessions(t *testing.T) {
 	}
 }
 
+func TestUsernameChangeRevokesOtherSessionsAndUpdatesLogin(t *testing.T) {
+	current := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
+	ta := newTestApp(t, func(options *Options) { options.Now = func() time.Time { return current } })
+	cookie, csrf := ta.bootstrap(t)
+	secret, _ := ta.enableTOTP(t, cookie, csrf, "correct-horse-42")
+	current = current.Add(31 * time.Second)
+	totp2, err := crypto.TOTPCode(secret, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchanged := ta.do(t, "POST", "/api/v1/auth/username", map[string]string{
+		"username": "admin", "current_password": "correct-horse-42", "totp_code": totp2,
+	}, cookie, csrf)
+	if unchanged.status != http.StatusUnauthorized {
+		t.Fatalf("same username must be rejected: %d %s", unchanged.status, unchanged.raw)
+	}
+	invalid := ta.do(t, "POST", "/api/v1/auth/username", map[string]string{
+		"username": "bad name", "current_password": "correct-horse-42", "totp_code": totp2,
+	}, cookie, csrf)
+	if invalid.status != http.StatusUnauthorized {
+		t.Fatalf("invalid username must be rejected: %d %s", invalid.status, invalid.raw)
+	}
+	changed := ta.do(t, "POST", "/api/v1/auth/username", map[string]string{
+		"username": "alice", "current_password": "correct-horse-42", "totp_code": totp2,
+	}, cookie, csrf)
+	if changed.status != http.StatusOK {
+		t.Fatalf("username change: %d %s", changed.status, changed.raw)
+	}
+	if changed.body["username"] != "alice" {
+		t.Fatalf("reissued session username: %s", changed.raw)
+	}
+	newCookie := sessionCookieFrom(t, changed)
+	oldMe := ta.do(t, "GET", "/api/v1/me", nil, cookie, "")
+	if oldMe.status != http.StatusUnauthorized {
+		t.Fatalf("old session must be revoked: %d %s", oldMe.status, oldMe.raw)
+	}
+	newMe := ta.do(t, "GET", "/api/v1/me", nil, newCookie, "")
+	if newMe.status != http.StatusOK {
+		t.Fatalf("current browser session must be reissued: %d %s", newMe.status, newMe.raw)
+	}
+	member, _ := newMe.body["member"].(map[string]any)
+	if member["username"] != "alice" || member["id"] == "" {
+		t.Fatalf("me after rename: %s", newMe.raw)
+	}
+	oldLogin := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "admin", "password": "correct-horse-42",
+	}, "", "")
+	if oldLogin.status != http.StatusUnauthorized {
+		t.Fatalf("old username still works: %d %s", oldLogin.status, oldLogin.raw)
+	}
+	newLogin := ta.do(t, "POST", "/api/v1/auth/login", map[string]string{
+		"username": "alice", "password": "correct-horse-42",
+	}, "", "")
+	if newLogin.status != http.StatusAccepted || newLogin.body["code"] != "second_factor_required" {
+		t.Fatalf("new username password step: %d %s", newLogin.status, newLogin.raw)
+	}
+}
+
 func TestPasswordChangeAndRenewalFollowTOTPPolicy(t *testing.T) {
 	current := time.Date(2026, time.August, 12, 12, 0, 0, 0, time.UTC)
 	ta := newTestApp(t, func(options *Options) { options.Now = func() time.Time { return current } })
@@ -441,6 +522,20 @@ func TestAuthenticationAuditMatrixIsValueFree(t *testing.T) {
 	}
 	cookie, csrf = sessionCookieFrom(t, renewed), renewed.body["csrf_token"].(string)
 
+	deniedUsername := ta.do(t, "POST", "/api/v1/auth/username", map[string]string{
+		"username": "alice", "current_password": "wrong-password-42",
+	}, cookie, csrf)
+	if deniedUsername.status != http.StatusUnauthorized {
+		t.Fatalf("denied username change: %d %s", deniedUsername.status, deniedUsername.raw)
+	}
+	renamed := ta.do(t, "POST", "/api/v1/auth/username", map[string]string{
+		"username": "alice", "current_password": password,
+	}, cookie, csrf)
+	if renamed.status != http.StatusOK {
+		t.Fatalf("username change: %d %s", renamed.status, renamed.raw)
+	}
+	cookie, csrf = sessionCookieFrom(t, renamed), renamed.body["csrf_token"].(string)
+
 	deniedPassword := ta.do(t, "POST", "/api/v1/auth/password", map[string]string{
 		"current_password": "wrong-password-42", "new_password": newPassword,
 	}, cookie, csrf)
@@ -463,6 +558,7 @@ func TestAuthenticationAuditMatrixIsValueFree(t *testing.T) {
 		"administrator.bootstrapped": {"active"},
 		"auth.login":                 {"local", "denied"},
 		"auth.renew":                 {"local", "denied"},
+		"member.username_changed":    {"ok", "denied"},
 		"member.password_changed":    {"ok", "denied"},
 	})
 	for _, secret := range []string{password, newPassword, "wrong-password-42"} {
@@ -475,7 +571,7 @@ func TestAuthenticationAuditMatrixIsValueFree(t *testing.T) {
 	if logout.status != http.StatusOK {
 		t.Fatalf("logout: %d %s", logout.status, logout.raw)
 	}
-	events, _, err := ta.store.ListAuditPage(t.Context(), database.AuditFilter{Action: "auth.logout", Limit: 10}, 0)
+	events, _, _, err := ta.store.ListAuditPage(t.Context(), database.AuditFilter{Action: "auth.logout", Limit: 10}, 0)
 	if err != nil || len(events) != 1 || events[0].Result != "ok" {
 		t.Fatalf("logout audit: events=%v err=%v", events, err)
 	}

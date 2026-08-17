@@ -26,6 +26,10 @@ func TestAuditCursorPaginationAndFilters(t *testing.T) {
 	if page.body["next_cursor"] == "" {
 		t.Fatalf("audit page must carry a next_cursor: %s", page.raw)
 	}
+	total, _ := page.body["total"].(float64)
+	if total < 2 {
+		t.Fatalf("audit page must include total: %s", page.raw)
+	}
 	items := page.body["items"].([]any)
 	if len(items) != 2 {
 		t.Fatalf("audit page size: %s", page.raw)

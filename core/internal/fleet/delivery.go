@@ -19,11 +19,13 @@ import (
 )
 
 // desiredResponse is what a node receives on polling: a stable ETag plus one
-// encrypted, signed envelope per assigned Bundle Revision.
+// encrypted, signed envelope per assigned Bundle Revision, and the server-side
+// polling interval the Agent must adopt.
 type desiredResponse struct {
-	ETag      string               `json:"etag"`
-	Envelopes []*envelope.Envelope `json:"envelopes"`
-	Cleanup   []cleanupInstruction `json:"cleanup,omitempty"`
+	ETag                string               `json:"etag"`
+	Envelopes           []*envelope.Envelope `json:"envelopes"`
+	Cleanup             []cleanupInstruction `json:"cleanup,omitempty"`
+	PollIntervalSeconds int                  `json:"poll_interval_seconds"`
 }
 
 type cleanupInstruction struct {
@@ -57,7 +59,10 @@ func (h *Handler) handleDesired(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = h.store.SetNodeDesired(r.Context(), node.ID, etag)
 	if len(revisionIDs) == 0 {
-		middleware.WriteJSON(w, http.StatusOK, desiredResponse{ETag: etag, Envelopes: []*envelope.Envelope{}, Cleanup: cleanup})
+		middleware.WriteJSON(w, http.StatusOK, desiredResponse{
+			ETag: etag, Envelopes: []*envelope.Envelope{}, Cleanup: cleanup,
+			PollIntervalSeconds: node.PollIntervalSeconds,
+		})
 		return
 	}
 	recipient, err := age.ParseX25519Recipient(node.AgePubkey)
@@ -74,7 +79,10 @@ func (h *Handler) handleDesired(w http.ResponseWriter, r *http.Request) {
 		}
 		envs = append(envs, env)
 	}
-	middleware.WriteJSON(w, http.StatusOK, desiredResponse{ETag: etag, Envelopes: envs, Cleanup: cleanup})
+	middleware.WriteJSON(w, http.StatusOK, desiredResponse{
+		ETag: etag, Envelopes: envs, Cleanup: cleanup,
+		PollIntervalSeconds: node.PollIntervalSeconds,
+	})
 }
 
 func (h *Handler) cleanupFor(r *http.Request, node *database.Node) []cleanupInstruction {
@@ -184,7 +192,10 @@ func (h *Handler) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
-	middleware.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{
+		"status":                "ok",
+		"poll_interval_seconds": node.PollIntervalSeconds,
+	})
 }
 
 func (h *Handler) handleReport(w http.ResponseWriter, r *http.Request) {

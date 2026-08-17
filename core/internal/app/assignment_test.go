@@ -90,8 +90,7 @@ func TestAssignmentNodeAmbiguity(t *testing.T) {
 }
 
 // TestAssignmentOptionalReason locks the risk policy
-// after the 2026-08 product decision: Assignment reasons are optional, and
-// Protected Environments need a current Step-up Grant.
+// after the 2026-08 product decision: Assignment reasons are optional.
 func TestAssignmentOptionalReason(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
@@ -105,29 +104,5 @@ func TestAssignmentOptionalReason(t *testing.T) {
 	}, a.cookie, a.csrf)
 	if noReason.status != http.StatusCreated {
 		t.Fatalf("assignment without operation reason must succeed: %d %s", noReason.status, noReason.raw)
-	}
-
-	// Protected Environment: assignment works without any password
-	// confirmation (Step-up removed by product decision 2026-08).
-	prot := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "prod", "protection": "protected"}, a.cookie, a.csrf)
-	prod := authoring{appID: a.appID, envID: prot.body["id"].(string), cookie: a.cookie, csrf: a.csrf}
-	ta.putPolicy(t, prod)
-	ta.createSecret(t, prod, "prod_token", "p1")
-	pub := ta.do(t, "POST", publishPath(prod),
-		reason("maintenance", "publish the production token"), a.cookie, a.csrf)
-	if pub.status != http.StatusCreated {
-		t.Fatalf("protected publish: %d %s", pub.status, pub.raw)
-	}
-	g2 := ta.do(t, "POST", "/api/v1/node-groups", map[string]string{"name": "g2"}, a.cookie, a.csrf)
-	allowed := ta.do(t, "POST", "/api/v1/assignments", map[string]any{
-		"group_id": g2.body["id"].(string), "application_id": a.appID,
-		"environment_id": prod.envID,
-		"operation_reason": map[string]string{
-			"category": "maintenance", "explanation": "assign the production bundle",
-		},
-	}, a.cookie, a.csrf)
-	if allowed.status != http.StatusCreated {
-		t.Fatalf("protected assignment: %d %s", allowed.status, allowed.raw)
 	}
 }

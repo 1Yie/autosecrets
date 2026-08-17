@@ -66,6 +66,18 @@ func (f *fakeRepo) UnbindExternalIdentity(context.Context, string, string, datab
 	return nil
 }
 
+func (f *fakeRepo) OAuthIdentityBinding(context.Context) (*database.ExternalIdentityBinding, error) {
+	return nil, database.ErrNotFound
+}
+
+func (f *fakeRepo) BindOAuthIdentity(context.Context, database.ExternalIdentityBinding, string, database.AuditEvent) error {
+	return nil
+}
+
+func (f *fakeRepo) UnbindOAuthIdentity(context.Context, string, string, database.AuditEvent) error {
+	return nil
+}
+
 type fakeAudit struct{ events []database.AuditEvent }
 
 func (f *fakeAudit) AppendAudit(ctx context.Context, e database.AuditEvent) error {

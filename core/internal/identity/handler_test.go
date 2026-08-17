@@ -17,6 +17,7 @@ func TestValidReturnToAllowsOnlyAuthenticatedApplicationPaths(t *testing.T) {
 		want  string
 	}{
 		{"/dashboard/security", "/dashboard/security"},
+		{"/dashboard/login-and-security", "/dashboard/login-and-security"},
 		{"/dashboard/apps?selected=one", "/dashboard/apps?selected=one"},
 		{"", "/dashboard/overview"},
 		{"https://attacker.example", "/dashboard/overview"},

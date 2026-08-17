@@ -210,7 +210,7 @@ func (ta *testApp) authoringSetup(t *testing.T) authoring {
 		t.Fatalf("create app: %d %s", app.status, app.raw)
 	}
 	env := ta.do(t, "POST", "/api/v1/applications/"+app.body["id"].(string)+"/environments",
-		map[string]string{"name": "production", "protection": "standard"}, cookie, csrf)
+		map[string]string{"name": "production"}, cookie, csrf)
 	if env.status != 201 {
 		t.Fatalf("create env: %d %s", env.status, env.raw)
 	}

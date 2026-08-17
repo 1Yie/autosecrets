@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -22,8 +21,7 @@ func reason(category, explanation string) map[string]any {
 
 // TestPublishOptionalReason locks the risk policy after
 // the 2026-08 product decision: Operation Reason is optional (omitted ->
-// 'other', malformed -> rejected); Protected and Unclassified Environments
-// preserve the later product decision that removed publish-specific Step-up.
+// 'other', malformed -> rejected).
 func TestPublishOptionalReason(t *testing.T) {
 	ta := newTestApp(t)
 	a := ta.authoringSetup(t)
@@ -52,36 +50,6 @@ func TestPublishOptionalReason(t *testing.T) {
 		reason("maintenance", "rotate the database password again"), a.cookie, a.csrf)
 	if unchanged.status != http.StatusConflict {
 		t.Fatalf("unchanged draft publish must conflict: %d %s", unchanged.status, unchanged.raw)
-	}
-
-	// Protected and Unclassified Environments publish without any extra
-	// password confirmation (Step-up removed by product decision 2026-08).
-	protected := ta.do(t, "POST", "/api/v1/applications/"+a.appID+"/environments",
-		map[string]string{"name": "prod", "protection": "protected"}, a.cookie, a.csrf)
-	if protected.status != http.StatusCreated {
-		t.Fatalf("protected environment: %d %s", protected.status, protected.raw)
-	}
-	protectedEnv := protected.body["id"].(string)
-	prodAuthoring := authoring{appID: a.appID, envID: protectedEnv, cookie: a.cookie, csrf: a.csrf}
-	ta.createSecret(t, prodAuthoring, "prod_token", "p1")
-
-	allowed := ta.do(t, "POST", publishPath(prodAuthoring),
-		reason("maintenance", "rotate the production token"), a.cookie, a.csrf)
-	if allowed.status != http.StatusCreated {
-		t.Fatalf("protected publish: %d %s", allowed.status, allowed.raw)
-	}
-
-	// Unclassified Environments (legacy migration rows) also publish freely.
-	legacyEnv := uuid.NewString()
-	if err := ta.store.CreateEnvironment(context.Background(), legacyEnv, a.appID, "legacy", "unclassified"); err != nil {
-		t.Fatal(err)
-	}
-	legacyAuthoring := authoring{appID: a.appID, envID: legacyEnv, cookie: a.cookie, csrf: a.csrf}
-	ta.createSecret(t, legacyAuthoring, "legacy_token", "l1")
-	allowedLegacy := ta.do(t, "POST", publishPath(legacyAuthoring),
-		reason("configuration_correction", "classify the legacy environment"), a.cookie, a.csrf)
-	if allowedLegacy.status != http.StatusCreated {
-		t.Fatalf("unclassified publish: %d %s", allowedLegacy.status, allowedLegacy.raw)
 	}
 }
 

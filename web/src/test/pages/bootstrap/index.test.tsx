@@ -7,7 +7,7 @@ import { BootstrapPage } from "../../../pages/bootstrap";
 import { useSessionStore } from "../../../stores/session-store";
 
 describe("BootstrapPage", () => {
-  it("requires code, organization name, username, and a 12+ char password", async () => {
+  it("requires code, username, and a 12+ char password", async () => {
     const qc = new QueryClient();
     render(
       <QueryClientProvider client={qc}>
@@ -21,7 +21,6 @@ describe("BootstrapPage", () => {
 
     const user = userEvent.setup();
     await user.type(screen.getByTestId("code"), "code-123");
-    await user.type(screen.getByTestId("organization-name"), "Acme");
     await user.type(screen.getByTestId("username"), "admin");
     await user.type(screen.getByTestId("password"), "short");
     expect(button).toBeDisabled();
@@ -31,8 +30,19 @@ describe("BootstrapPage", () => {
     expect(button).toBeEnabled();
   });
 
+  it("does not ask for an organization name", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <BootstrapPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByTestId("organization-name")).not.toBeInTheDocument();
+  });
+
   it("activates the Administrator and stores the new Session without an MFA wizard", async () => {
-	useSessionStore.getState().clearSession();
+    useSessionStore.getState().clearSession();
     const qc = new QueryClient();
     render(
       <QueryClientProvider client={qc}>
@@ -43,16 +53,16 @@ describe("BootstrapPage", () => {
     );
     const user = userEvent.setup();
     await user.type(screen.getByTestId("code"), "code-123");
-    await user.type(screen.getByTestId("organization-name"), "Acme");
     await user.type(screen.getByTestId("username"), "admin");
     await user.type(screen.getByTestId("password"), "correct-horse-42");
     await user.click(screen.getByRole("button", { name: "创建管理员" }));
 
-    expect(await screen.findByRole("heading", { name: "初始化 AutoSecrets" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "初始化 AutoSecrets" }),
+    ).toBeVisible();
     expect(useSessionStore.getState().csrfToken).toBe("csrf-test-token");
     expect(qc.getQueryData(["me"])).toMatchObject({
       bootstrap_required: false,
-      organization: { display_name: "Acme" },
       member: { username: "admin", role: "administrator" },
       totp_login_required: false,
       auth_method: "local",

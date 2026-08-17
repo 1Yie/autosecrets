@@ -12,8 +12,9 @@ export interface Revision { id: string; draft_version: number; file_count: numbe
 export interface RevisionRef { revision_id: string; label: string; }
 
 export function useDraft(appId: string, envId: string) {
-  return useQuery({
-    queryKey: ["draft", appId, envId],
-    queryFn: () => apiGet<Draft>(API_PATHS.draft(appId, envId)),
-  });
+	return useQuery({
+		queryKey: ["draft", appId, envId],
+		queryFn: () => apiGet<Draft>(API_PATHS.draft(appId, envId)),
+		enabled: appId.length > 0 && envId.length > 0,
+	});
 }

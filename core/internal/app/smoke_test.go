@@ -51,6 +51,26 @@ func TestApplicationListAndDetail(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("applications payload: %s", list.raw)
 	}
+	if list.body["total"] != float64(1) {
+		t.Fatalf("application list must include total: %s", list.raw)
+	}
+	ta.do(t, "POST", "/api/v1/applications", map[string]string{"name": "billing"}, a.cookie, a.csrf)
+	ta.do(t, "POST", "/api/v1/applications", map[string]string{"name": "ledger"}, a.cookie, a.csrf)
+	page2 := ta.do(t, "GET", "/api/v1/applications?limit=1&page=2", nil, a.cookie, "")
+	if page2.status != 200 {
+		t.Fatalf("application page 2: %d %s", page2.status, page2.raw)
+	}
+	if page2.body["total"] != float64(3) {
+		t.Fatalf("application total after three apps: %s", page2.raw)
+	}
+	rows2 := parsePage(t, page2.raw)
+	if len(rows2) != 1 {
+		t.Fatalf("application page 2 size: %s", page2.raw)
+	}
+	page1 := parsePage(t, ta.do(t, "GET", "/api/v1/applications?limit=1&page=1", nil, a.cookie, "").raw)
+	if rows2[0]["id"] == page1[0]["id"] {
+		t.Fatalf("application page 2 must not repeat page 1: %s", page2.raw)
+	}
 	detail := ta.do(t, "GET", "/api/v1/applications/"+a.appID, nil, a.cookie, "")
 	if detail.status != 200 {
 		t.Fatalf("application detail: %d %s", detail.status, detail.raw)

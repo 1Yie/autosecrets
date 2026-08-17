@@ -17,50 +17,50 @@ const LoginPage = lazy(() => import("../pages/login"));
 const BootstrapPage = lazy(() => import("../pages/bootstrap"));
 
 function lazyPage(element: React.ReactNode) {
-  return (
-    <Suspense
-      fallback={
-        <div className="flex justify-center p-12">
-          <Spinner />
-        </div>
-      }
-    >
-      {element}
-    </Suspense>
-  );
+	return (
+		<Suspense
+			fallback={
+				<div className="flex justify-center p-12">
+					<Spinner />
+				</div>
+			}
+		>
+			{element}
+		</Suspense>
+	);
 }
 
 /** Centralized route table: /auth/* for unauthenticated flows, /dashboard/*
  * for the authenticated console. Route-level Error Boundary via errorElement. */
 export const router = createBrowserRouter([
-  {
-    path: "/",
-    element: <Navigate to="/dashboard/overview" replace />,
-  },
-  {
-    path: "/auth",
-    element: <AuthLayout />,
-    errorElement: <ErrorBoundary />,
-    children: [
-      { index: true, element: <Navigate to="/auth/login" replace /> },
-      { path: "login", element: lazyPage(<LoginPage />) },
-      { path: "bootstrap", element: lazyPage(<BootstrapPage />) },
-    ],
-  },
-  {
-    path: "/dashboard",
-    element: <DashboardLayout />,
-    errorElement: <ErrorBoundary />,
-    children: [
-      { index: true, element: <Navigate to="/dashboard/overview" replace /> },
-      { path: "overview", element: lazyPage(<OverviewPage />) },
-      { path: "apps", element: lazyPage(<AppsPage />) },
-      { path: "apps/:appId", element: lazyPage(<AppPage />) },
-      { path: "nodes", element: lazyPage(<NodesPage />) },
-      { path: "audit", element: lazyPage(<AuditPage />) },
-      { path: "security", element: lazyPage(<SecurityPage />) },
-      { path: "*", element: <NotFoundPage /> },
-    ],
-  },
-  { path: "*", element: <NotFoundPage /> },
+	{
+		path: "/",
+		element: <Navigate to="/dashboard/overview" replace />,
+	},
+	{
+		path: "/auth",
+		element: <AuthLayout />,
+		errorElement: <ErrorBoundary />,
+		children: [
+			{ index: true, element: <Navigate to="/auth/login" replace /> },
+			{ path: "login", element: lazyPage(<LoginPage />) },
+			{ path: "bootstrap", element: lazyPage(<BootstrapPage />) },
+		],
+	},
+	{
+		path: "/dashboard",
+		element: <DashboardLayout />,
+		errorElement: <ErrorBoundary />,
+		children: [
+			{ index: true, element: <Navigate to="/dashboard/overview" replace /> },
+			{ path: "overview", element: lazyPage(<OverviewPage />) },
+			{ path: "apps", element: lazyPage(<AppsPage />) },
+			{ path: "apps/:appId", element: lazyPage(<AppPage />) },
+			{ path: "nodes", element: lazyPage(<NodesPage />) },
+			{ path: "audit", element: lazyPage(<AuditPage />) },
+			{ path: "login-and-security", element: lazyPage(<SecurityPage />) },
+			{ path: "*", element: <NotFoundPage /> },
+		],
+	},
+	{ path: "*", element: <NotFoundPage /> },
 ]);

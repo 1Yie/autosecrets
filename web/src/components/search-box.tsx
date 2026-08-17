@@ -36,10 +36,11 @@ export function SearchBox() {
   return (
     <div className="relative">
       <InputGroup className="w-56">
-        <InputGroupAddon>
+        <InputGroupAddon className="ps-2.5 pe-1.5">
           <Search className="size-4" aria-hidden="true" />
         </InputGroupAddon>
         <InputGroupInput
+          className="**:data-[slot=input]:ps-0"
           type="search"
           placeholder="搜索…"
           value={query}

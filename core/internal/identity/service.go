@@ -356,6 +356,35 @@ func (s *Service) ChangePassword(ctx context.Context, memberID, currentPassword,
 	return s.issueSession(ctx, member, "local")
 }
 
+func (s *Service) ChangeUsername(ctx context.Context, memberID, username, currentPassword, totpCode string) (*Session, error) {
+	if !usernameRe.MatchString(username) {
+		s.auditEvent(ctx, "administrator:"+memberID, "member.username_changed", memberID, "denied")
+		return nil, ErrInvalidCredentials
+	}
+	member, err := s.repo.MemberByID(ctx, memberID)
+	if err != nil {
+		s.auditEvent(ctx, "administrator:"+memberID, "member.username_changed", memberID, "denied")
+		return nil, ErrInvalidCredentials
+	}
+	if username == member.Username {
+		s.auditEvent(ctx, "member:"+member.Username, "member.username_changed", member.ID, "denied")
+		return nil, ErrInvalidCredentials
+	}
+	ok, err := crypto.VerifyPassword(currentPassword, member.PasswordHash)
+	if err != nil || !ok || !s.policyProofValid(ctx, member, totpCode, "", false) {
+		s.auditEvent(ctx, "member:"+member.Username, "member.username_changed", member.ID, "denied")
+		return nil, ErrInvalidCredentials
+	}
+	if err := s.repo.ChangeUsername(ctx, member.ID, username, database.AuditEvent{
+		Actor: "member:" + member.Username, Action: "member.username_changed", Resource: member.ID,
+		Result: "ok", CorrelationID: CorrelationID(ctx),
+	}); err != nil {
+		return nil, err
+	}
+	member.Username = username
+	return s.issueSession(ctx, member, "local")
+}
+
 func (s *Service) Logout(ctx context.Context, sessionIDHash, memberID, username string) {
 	if sessionIDHash != "" {
 		_ = s.repo.DeleteSession(ctx, sessionIDHash)
@@ -512,6 +541,97 @@ func (s *Service) CompleteOIDCBinding(ctx context.Context, transaction *database
 	})
 }
 
+func (s *Service) StartOAuthLogin(ctx context.Context, returnTo string) (*OIDCStart, error) {
+	binding, err := s.repo.OAuthIdentityBinding(ctx)
+	if err != nil || binding == nil {
+		s.auditEvent(ctx, "authentication", "auth.login", "", "denied")
+		return nil, ErrInvalidCredentials
+	}
+	return s.createOIDCTransaction(ctx, "login", "", returnTo)
+}
+
+func (s *Service) StartOAuthBinding(ctx context.Context, memberID, password, totpCode, returnTo string) (*OIDCStart, error) {
+	member, err := s.repo.MemberByID(ctx, memberID)
+	if err != nil {
+		s.auditEvent(ctx, "administrator:"+memberID, "administrator.oauth_bound", memberID, "denied")
+		return nil, ErrInvalidCredentials
+	}
+	passwordOK, err := crypto.VerifyPassword(password, member.PasswordHash)
+	if err != nil || !passwordOK || !s.policyProofValid(ctx, member, totpCode, "", false) {
+		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oauth_bound", member.ID, "denied")
+		return nil, ErrInvalidCredentials
+	}
+	if _, err := s.repo.OAuthIdentityBinding(ctx); err == nil {
+		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oauth_bound", member.ID, "conflict")
+		return nil, database.ErrConflict
+	} else if !errors.Is(err, database.ErrNotFound) {
+		return nil, err
+	}
+	return s.createOIDCTransaction(ctx, "bind", memberID, returnTo)
+}
+
+func (s *Service) CompleteOAuthLogin(ctx context.Context, transaction *database.OIDCTransaction, identity *OIDCIdentity) (*Session, error) {
+	if transaction == nil || transaction.Purpose != "login" || identity == nil {
+		s.auditEvent(ctx, "authentication", "auth.login", "", "denied")
+		return nil, ErrInvalidCredentials
+	}
+	binding, err := s.repo.OAuthIdentityBinding(ctx)
+	if err != nil || binding.Issuer != identity.Issuer || binding.Subject != identity.Subject {
+		s.auditEvent(ctx, "authentication", "auth.login", "", "denied")
+		return nil, ErrInvalidCredentials
+	}
+	member, err := s.repo.MemberByID(ctx, binding.MemberID)
+	if err != nil || member.Status != database.MemberActive {
+		s.auditEvent(ctx, "authentication", "auth.login", "", "denied")
+		return nil, ErrInvalidCredentials
+	}
+	session, err := s.issueSession(ctx, member, "oauth")
+	if err == nil {
+		s.auditEvent(ctx, "member:"+member.Username, "auth.login", member.ID, "oauth")
+	}
+	return session, err
+}
+
+func (s *Service) CompleteOAuthBinding(ctx context.Context, transaction *database.OIDCTransaction, identity *OIDCIdentity, currentSessionHash string) error {
+	if transaction == nil || transaction.Purpose != "bind" || transaction.MemberID == "" || identity == nil {
+		s.auditEvent(ctx, "authentication", "administrator.oauth_bound", "", "denied")
+		return ErrInvalidCredentials
+	}
+	member, err := s.repo.MemberByID(ctx, transaction.MemberID)
+	if err != nil || member.Status != database.MemberActive {
+		s.auditEvent(ctx, "administrator:"+transaction.MemberID, "administrator.oauth_bound", transaction.MemberID, "denied")
+		return ErrInvalidCredentials
+	}
+	return s.repo.BindOAuthIdentity(ctx, database.ExternalIdentityBinding{
+		MemberID: transaction.MemberID, Issuer: identity.Issuer,
+		Subject: identity.Subject, DisplayName: identity.DisplayName,
+	}, currentSessionHash, database.AuditEvent{
+		Actor: "administrator:" + member.Username, Action: "administrator.oauth_bound", Resource: member.ID,
+		Result: "ok", CorrelationID: CorrelationID(ctx),
+	})
+}
+
+func (s *Service) UnbindOAuth(ctx context.Context, memberID, currentSessionHash, password, totpCode string) error {
+	member, err := s.repo.MemberByID(ctx, memberID)
+	if err != nil {
+		s.auditEvent(ctx, "administrator:"+memberID, "administrator.oauth_unbound", memberID, "denied")
+		return ErrInvalidCredentials
+	}
+	passwordOK, err := crypto.VerifyPassword(password, member.PasswordHash)
+	if err != nil || !passwordOK || !s.policyProofValid(ctx, member, totpCode, "", false) {
+		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oauth_unbound", member.ID, "denied")
+		return ErrInvalidCredentials
+	}
+	if _, err := s.repo.OAuthIdentityBinding(ctx); err != nil {
+		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oauth_unbound", member.ID, "denied")
+		return database.ErrNotFound
+	}
+	return s.repo.UnbindOAuthIdentity(ctx, memberID, currentSessionHash, database.AuditEvent{
+		Actor: "administrator:" + member.Username, Action: "administrator.oauth_unbound", Resource: member.ID,
+		Result: "ok", CorrelationID: CorrelationID(ctx),
+	})
+}
+
 func (s *Service) UnbindOIDC(ctx context.Context, memberID, currentSessionHash, password, totpCode string) error {
 	member, err := s.repo.MemberByID(ctx, memberID)
 	if err != nil {
@@ -555,10 +675,18 @@ func (s *Service) verifySecondFactor(ctx context.Context, member *database.Membe
 }
 
 func (s *Service) AuditOIDCCallbackDenied(ctx context.Context, purpose, memberID string) {
+	s.auditExternalCallbackDenied(ctx, purpose, memberID, "administrator.oidc_bound")
+}
+
+func (s *Service) AuditOAuthCallbackDenied(ctx context.Context, purpose, memberID string) {
+	s.auditExternalCallbackDenied(ctx, purpose, memberID, "administrator.oauth_bound")
+}
+
+func (s *Service) auditExternalCallbackDenied(ctx context.Context, purpose, memberID, bindAction string) {
 	action := "auth.login"
 	actor := "authentication"
 	if purpose == "bind" {
-		action = "administrator.oidc_bound"
+		action = bindAction
 		actor = "administrator:" + memberID
 	}
 	s.auditEvent(ctx, actor, action, memberID, "denied")

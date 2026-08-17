@@ -39,7 +39,10 @@ export async function api<T = unknown>(
     data = text;
   }
   if (!res.ok) {
-    const body = data && typeof data === "object" ? (data as { error?: string; code?: string }) : null;
+    const body =
+      data && typeof data === "object"
+        ? (data as { error?: string; code?: string })
+        : null;
     const message = body?.error ?? `HTTP ${res.status}`;
     const code = body?.code ?? "unknown";
     throw new ApiError(res.status, code, message);
@@ -48,6 +51,11 @@ export async function api<T = unknown>(
 }
 
 export const apiGet = <T>(path: string) => api<T>("GET", path);
-export const apiPost = <T>(path: string, body?: unknown) => api<T>("POST", path, body);
-export const apiPut = <T>(path: string, body?: unknown) => api<T>("PUT", path, body);
-export const apiDelete = <T>(path: string, body?: unknown) => api<T>("DELETE", path, body);
+export const apiPost = <T>(path: string, body?: unknown) =>
+  api<T>("POST", path, body);
+export const apiPut = <T>(path: string, body?: unknown) =>
+  api<T>("PUT", path, body);
+export const apiPatch = <T>(path: string, body?: unknown) =>
+  api<T>("PATCH", path, body);
+export const apiDelete = <T>(path: string, body?: unknown) =>
+  api<T>("DELETE", path, body);

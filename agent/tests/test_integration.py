@@ -34,7 +34,7 @@ ca_bundle = "{core_stack['keys'] / 'agent-ca.crt'}"
     # Authoring path.
     _, app, _ = api(admin, "POST", "/api/v1/applications", {"name": "payments"})
     _, env, _ = api(admin, "POST", f"/api/v1/applications/{app['id']}/environments",
-                    {"name": "production", "protection": "standard"})
+                    {"name": "production"})
     secret_value = "fixture-db-password-1"
     _, secret, _ = api(admin, "POST",
                        f"/api/v1/applications/{app['id']}/environments/{env['id']}/secrets",
