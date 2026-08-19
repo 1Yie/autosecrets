@@ -1,15 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiPost } from "../../lib/api";
 import { API_PATHS } from "../../lib/constants/api-paths";
+import type { ManagedNode } from "./use-nodes";
 
-export function useInstallCommand(nodeId: string) {
+export function useCreateNode() {
 	const qc = useQueryClient();
 	return useMutation({
-		mutationFn: (body?: { bundle_dir?: string }) =>
-			apiPost<{ command: string; expires_at: string }>(
-				API_PATHS.nodeInstallCommand(nodeId),
-				body ?? {},
-			),
+		mutationFn: (body: { name: string; bundle_dir?: string }) =>
+			apiPost<ManagedNode>(API_PATHS.nodes, body),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["nodes"] }),
 	});
 }

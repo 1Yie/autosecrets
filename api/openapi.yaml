@@ -23,7 +23,7 @@ info:
     Error model: every error response carries {"error": string, "code": string}.
     Clients must switch on `code`, never on the human-readable `error` message.
     Codes: bad_request, unauthorized, forbidden, not_found, conflict, duplicate,
-    internal, unavailable, payload_too_large.
+    internal, unavailable, payload_too_large, password_login_disabled.
 security:
   - sessionCookie: []
 tags:
@@ -183,6 +183,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
   /api/v1/auth/totp/enrollment:
@@ -607,6 +609,41 @@ paths:
                 $ref: "#/components/schemas/AuthenticationSecurity"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /api/v1/auth/password-login:
+    put:
+      operationId: setPasswordLogin
+      tags: [Identity]
+      summary: >-
+        Enable or disable the Password Login Policy after local credential
+        proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, password]
+              properties:
+                enabled:
+                  type: boolean
+                password:
+                  type: string
+                totp_code:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+      responses:
+        "200":
+          description: Updated Password Login Policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordLoginPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/auth/oidc/binding:
     post:
       operationId: startOIDCBinding
@@ -664,6 +701,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/auth/oauth/binding:
     post:
       operationId: startOAuthBinding
@@ -722,6 +761,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   /api/v1/auth/logout:
     post:
       operationId: logout
@@ -1576,11 +1617,43 @@ paths:
                 $ref: "#/components/schemas/NodePage"
         "401":
           $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createNode
+      tags: [Fleet]
+      summary: Reserve a Managed Node before issuing an Install Command
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                bundle_dir:
+                  type: string
+                  description: >-
+                    Optional Materialized Bundle root on the node. Must be an
+                    absolute path or start with ~/.
+      responses:
+        "201":
+          description: Reserved node; generate a connection next
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /api/v1/nodes/{nodeID}:
     patch:
       operationId: updateNode
       tags: [Fleet]
-      summary: Adjust a Managed Node's settings, such as its polling interval
+      summary: >-
+        Rename a Managed Node or adjust its polling interval and bundle path
       parameters:
         - $ref: "#/components/parameters/NodeID"
       requestBody:
@@ -1588,8 +1661,13 @@ paths:
           application/json:
             schema:
               type: object
-              required: [poll_interval_seconds]
+              minProperties: 1
               properties:
+                name:
+                  type: string
+                  maxLength: 64
+                bundle_dir:
+                  type: string
                 poll_interval_seconds:
                   type: integer
                   minimum: 5
@@ -1603,15 +1681,22 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, poll_interval_seconds]
-                properties:
-                  id:
-                    type: string
-                  poll_interval_seconds:
-                    type: integer
+                $ref: "#/components/schemas/Node"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteNode
+      tags: [Fleet]
+      summary: Delete a Managed Node and its reserved enrollment tokens
+      parameters:
+        - $ref: "#/components/parameters/NodeID"
+      responses:
+        "204":
+          description: Node deleted
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -1659,6 +1744,37 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "201":
+          description: Install Command; the Token appears in this response only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallCommand"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+  /api/v1/nodes/{nodeID}/install-command:
+    post:
+      operationId: createNodeInstallCommand
+      tags: [Fleet]
+      summary: >-
+        Issue a ten-minute single-use Enrollment Token for an existing node
+      parameters:
+        - $ref: "#/components/parameters/NodeID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bundle_dir:
+                  type: string
+                  description: >-
+                    Optional override of the node's stored bundle directory
+      responses:
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "201":
           description: Install Command; the Token appears in this response only
           content:
@@ -1995,11 +2111,22 @@ components:
       allOf:
         - $ref: "#/components/schemas/ExternalProviderPublicStatus"
         - type: object
+          required: [password_login_available]
           properties:
+            password_login_available:
+              type: boolean
             oidc:
               $ref: "#/components/schemas/ExternalProviderPublicStatus"
             oauth:
               $ref: "#/components/schemas/ExternalProviderPublicStatus"
+    PasswordLoginPolicy:
+      type: object
+      required: [password_login_enabled, password_login_available]
+      properties:
+        password_login_enabled:
+          type: boolean
+        password_login_available:
+          type: boolean
     OIDCBindingProof:
       type: object
       required: [password]
@@ -2028,9 +2155,18 @@ components:
           type: string
     AuthenticationSecurity:
       type: object
-      required: [totp_login_required, oidc, oauth]
+      required:
+        - totp_login_required
+        - password_login_enabled
+        - password_login_available
+        - oidc
+        - oauth
       properties:
         totp_login_required:
+          type: boolean
+        password_login_enabled:
+          type: boolean
+        password_login_available:
           type: boolean
         oidc:
           $ref: "#/components/schemas/ExternalProviderSecurity"
@@ -2342,6 +2478,8 @@ components:
         - state
         - unassigned
         - poll_interval_seconds
+        - bundle_dir
+        - enrolled
       properties:
         id:
           type: string
@@ -2376,6 +2514,12 @@ components:
             How often the Agent polls for Desired State; Core delivers it in
             the desired/heartbeat responses and the Agent adopts it on its
             next pass.
+        bundle_dir:
+          type: string
+          description: Materialized Bundle root stored for this node
+        enrolled:
+          type: boolean
+          description: True after the Agent has consumed an Enrollment Token
     Overview:
       type: object
       required:
@@ -2592,3 +2736,4 @@ components:
             - second_factor_required
             - challenge_expired
             - rate_limited
+            - password_login_disabled

@@ -14,6 +14,8 @@ export interface ManagedNode {
 	state: "never_online" | "healthy" | "converging" | "failed" | "offline";
 	unassigned: boolean;
 	poll_interval_seconds: number;
+	bundle_dir: string;
+	enrolled: boolean;
 }
 
 export function useNodes() {

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiDelete, apiGet, apiPost } from "../../lib/api";
+import { apiDelete, apiGet, apiPost, apiPut } from "../../lib/api";
 import { API_PATHS } from "../../lib/constants/api-paths";
 import { useSessionStore } from "../../stores/session-store";
 import type { EnrollmentContext } from "../../components/mfa-enrollment-steps";
@@ -14,6 +14,8 @@ export interface ExternalProviderSecurity {
 
 export interface AuthenticationSecurity {
   totp_login_required: boolean;
+  password_login_enabled?: boolean;
+  password_login_available?: boolean;
   oidc: ExternalProviderSecurity;
   oauth?: ExternalProviderSecurity;
 }
@@ -38,6 +40,24 @@ export function useStartTOTPEnrollment() {
   });
 }
 
+export interface PasswordLoginPolicy {
+  password_login_enabled: boolean;
+  password_login_available: boolean;
+}
+
+export function useSetPasswordLogin() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { enabled: boolean } & CredentialProof) =>
+      apiPut<PasswordLoginPolicy>(API_PATHS.authPasswordLogin, body),
+    onSuccess: () =>
+      Promise.all([
+        client.invalidateQueries({ queryKey: ["auth-security"] }),
+        client.invalidateQueries({ queryKey: ["oidc-status"] }),
+      ]),
+  });
+}
+
 export function useDisableTOTP() {
   const client = useQueryClient();
   return useMutation({
@@ -52,7 +72,7 @@ export function useStartOIDCBinding() {
     mutationFn: (proof: CredentialProof) =>
       apiPost<{ authorization_url: string }>(API_PATHS.oidcBinding, {
         ...proof,
-        return_to: "/dashboard/login-and-security",
+        return_to: "/dashboard/settings?section=external",
       }),
   });
 }
@@ -75,7 +95,7 @@ export function useStartOAuthBinding() {
     mutationFn: (proof: CredentialProof) =>
       apiPost<{ authorization_url: string }>(API_PATHS.oauthBinding, {
         ...proof,
-        return_to: "/dashboard/login-and-security",
+        return_to: "/dashboard/settings?section=external",
       }),
   });
 }

@@ -753,18 +753,19 @@ func (q *Queries) OAuthIdentityBinding(ctx context.Context) (OAuthIdentityBindin
 }
 
 const organization = `-- name: Organization :one
-SELECT display_name, totp_login_required FROM organization_config WHERE singleton
+SELECT display_name, totp_login_required, password_login_enabled FROM organization_config WHERE singleton
 `
 
 type OrganizationRow struct {
-	DisplayName       string `json:"display_name"`
-	TotpLoginRequired bool   `json:"totp_login_required"`
+	DisplayName          string `json:"display_name"`
+	TotpLoginRequired    bool   `json:"totp_login_required"`
+	PasswordLoginEnabled bool   `json:"password_login_enabled"`
 }
 
 func (q *Queries) Organization(ctx context.Context) (OrganizationRow, error) {
 	row := q.db.QueryRow(ctx, organization)
 	var i OrganizationRow
-	err := row.Scan(&i.DisplayName, &i.TotpLoginRequired)
+	err := row.Scan(&i.DisplayName, &i.TotpLoginRequired, &i.PasswordLoginEnabled)
 	return i, err
 }
 
@@ -864,6 +865,15 @@ func (q *Queries) SelectMemberRoleStatus(ctx context.Context, id string) (Select
 	var i SelectMemberRoleStatusRow
 	err := row.Scan(&i.Role, &i.Status)
 	return i, err
+}
+
+const setPasswordLoginEnabled = `-- name: SetPasswordLoginEnabled :exec
+UPDATE organization_config SET password_login_enabled = $1, updated_at = now() WHERE singleton
+`
+
+func (q *Queries) SetPasswordLoginEnabled(ctx context.Context, passwordLoginEnabled bool) error {
+	_, err := q.db.Exec(ctx, setPasswordLoginEnabled, passwordLoginEnabled)
+	return err
 }
 
 const tOTPEnrollmentForMember = `-- name: TOTPEnrollmentForMember :one

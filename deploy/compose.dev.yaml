@@ -28,6 +28,10 @@ services:
       context: ../core
       args:
         SOURCE_COMMIT: ${SOURCE_COMMIT:-}
+        # Host Clash/HTTP_PROXY is 127.0.0.1 and is invisible inside
+        # BuildKit. Default to a mainland-reachable module proxy.
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        GOSUMDB: ${GOSUMDB:-off}
     restart: unless-stopped
     depends_on:
       postgres:

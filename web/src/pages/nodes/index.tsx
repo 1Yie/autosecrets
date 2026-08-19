@@ -3,17 +3,16 @@ import { useDocumentTitle } from "../../hooks/use-document-title";
 import { useNodes } from "../../hooks/fleet/use-nodes";
 import { useNodeGroups } from "../../hooks/fleet/use-node-groups";
 import { useDeleteNodeGroup } from "../../hooks/fleet/use-delete-node-group";
-import { useUpdateNode } from "../../hooks/fleet/use-update-node";
+import { useDeleteNode } from "../../hooks/fleet/use-delete-node";
+import { CreateNodeForm } from "./create-node-form";
+import { EditNodeDialog } from "./edit-node-dialog";
 import { InstallCommandCard } from "./install-command-card";
 import { CreateNodeGroupForm } from "./create-node-group-form";
 import { NodeGroupSheet } from "./node-group-sheet";
 import { ConfirmDelete } from "../../components/confirm-delete";
 import { ErrorBoundary } from "../../components/error-boundary";
 import type { ManagedNode } from "../../hooks/fleet/use-nodes";
-import {
-	POLL_INTERVAL_OPTIONS,
-	pollIntervalLabel,
-} from "../../lib/constants/poll-interval";
+import { pollIntervalLabel } from "../../lib/constants/poll-interval";
 import {
 	Table,
 	TableBody,
@@ -28,14 +27,6 @@ import { TablePagination } from "../../components/table-pagination";
 import { StatusBadge } from "../../components/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTab } from "../../components/ui/tabs";
 import { Badge } from "../../components/ui/badge";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "../../components/ui/select";
-import { Button } from "../../components/ui/button";
 import { toastSuccess } from "../../lib/toast";
 
 export function NodesPage() {
@@ -57,7 +48,7 @@ export function NodesPage() {
 					</TabsList>
 					{tab === "nodes" ? (
 						<ErrorBoundary>
-							<InstallCommandCard />
+							<CreateNodeForm />
 						</ErrorBoundary>
 					) : (
 						<CreateNodeGroupForm />
@@ -69,7 +60,7 @@ export function NodesPage() {
 					{nodes.isError && <p className="text-sm text-red-500">节点列表加载失败</p>}
 					{nodes.items.length === 0 && !nodes.isLoading && (
 						<p className="opacity-60">
-							还没有托管节点，点右侧「添加服务器」生成安装命令。
+							还没有托管节点，点右侧「添加服务器」登记一台。
 						</p>
 					)}
 					{nodes.items.length > 0 && (
@@ -144,6 +135,7 @@ function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
 					<TableHead className="p-2">最近结果</TableHead>
 					<TableHead className="p-2">更新频率</TableHead>
 					<TableHead className="p-2">最后在线</TableHead>
+					<TableHead className="p-2 text-right">操作</TableHead>
 				</TableRow>
 			</TableHeader>
 			<TableBody>
@@ -154,16 +146,17 @@ function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
 							<StatusBadge status={n.state} unassigned={n.unassigned} />
 						</TableCell>
 						<TableCell className="p-2 font-mono">
-							{n.observed_revision.slice(0, 8)}…
+							{n.observed_revision ? `${n.observed_revision.slice(0, 8)}…` : "—"}
 						</TableCell>
 						<TableCell className="p-2">{n.last_result}</TableCell>
 						<TableCell className="p-2">
-							<PollIntervalSelect node={n} />
+							{pollIntervalLabel(n.poll_interval_seconds)}
 						</TableCell>
 						<TableCell className="p-2">
-							{n.last_seen_at
-								? new Date(n.last_seen_at).toLocaleTimeString()
-								: "never"}
+							{n.last_seen_at ? new Date(n.last_seen_at).toLocaleTimeString() : "从未"}
+						</TableCell>
+						<TableCell className="p-2">
+							<NodeActions node={n} />
 						</TableCell>
 					</TableRow>
 				))}
@@ -172,57 +165,24 @@ function NodeTable({ nodes }: { nodes: ManagedNode[] }) {
 	);
 }
 
-function PollIntervalSelect({ node }: { node: ManagedNode }) {
-	const update = useUpdateNode(node.id);
-	const [draft, setDraft] = useState(String(node.poll_interval_seconds));
-	const dirty = Number(draft) !== node.poll_interval_seconds;
-	const options = POLL_INTERVAL_OPTIONS.includes(
-		node.poll_interval_seconds as (typeof POLL_INTERVAL_OPTIONS)[number],
-	)
-		? POLL_INTERVAL_OPTIONS
-		: [...POLL_INTERVAL_OPTIONS, node.poll_interval_seconds];
-
-	const save = () => {
-		update.mutate(Number(draft), {
-			onSuccess: () => toastSuccess("轮询间隔已更新"),
-		});
-	};
-
+function NodeActions({ node }: { node: ManagedNode }) {
+	const remove = useDeleteNode();
 	return (
-		<div className="flex items-center gap-1.5">
-			<Select
-				value={draft}
-				onValueChange={(value) => {
-					setDraft(value ?? String(node.poll_interval_seconds));
-				}}
-			>
-				<SelectTrigger
-					size="sm"
-					className="w-28"
-					data-testid={`poll-interval-${node.id}`}
-				>
-					<SelectValue>
-						{pollIntervalLabel(Number(draft) || node.poll_interval_seconds)}
-					</SelectValue>
-				</SelectTrigger>
-				<SelectContent>
-					{options.map((seconds) => (
-						<SelectItem key={seconds} value={String(seconds)}>
-							{pollIntervalLabel(seconds)}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
-			<Button
-				size="xs"
-				variant="outline"
-				className="shrink-0"
-				disabled={!dirty || update.isPending}
-				onClick={save}
-				data-testid={`poll-interval-save-${node.id}`}
-			>
-				{update.isPending ? "保存中…" : "保存"}
-			</Button>
+		<div className="flex items-center justify-end gap-2">
+			<InstallCommandCard node={node} />
+			<EditNodeDialog node={node} />
+			<ConfirmDelete
+				label="删除"
+				title={`删除服务器 ${node.name}？`}
+				description="会删除该节点及其预留的安装令牌。已在节点组中的成员关系也会一并移除。"
+				pending={remove.isPending}
+				error={remove.isError ? String((remove.error as Error).message) : undefined}
+				onConfirm={() =>
+					remove.mutate(node.id, {
+						onSuccess: () => toastSuccess("服务器已删除"),
+					})
+				}
+			/>
 		</div>
 	);
 }

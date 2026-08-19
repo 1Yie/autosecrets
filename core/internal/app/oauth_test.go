@@ -38,14 +38,14 @@ func TestOAuthBindingLoginAndUnbindJourney(t *testing.T) {
 	}
 
 	deniedBinding := ta.do(t, "POST", "/api/v1/auth/oauth/binding", map[string]string{
-		"password": "wrong-password-42", "return_to": "/dashboard/login-and-security",
+		"password": "wrong-password-42", "return_to": "/dashboard/settings",
 	}, cookie, csrf)
 	if deniedBinding.status != http.StatusUnauthorized {
 		t.Fatalf("binding accepted invalid credentials: %d %s", deniedBinding.status, deniedBinding.raw)
 	}
 
 	started := ta.do(t, "POST", "/api/v1/auth/oauth/binding", map[string]string{
-		"password": "correct-horse-42", "return_to": "/dashboard/login-and-security",
+		"password": "correct-horse-42", "return_to": "/dashboard/settings",
 	}, cookie, csrf)
 	if started.status != http.StatusOK {
 		t.Fatalf("start binding: %d %s", started.status, started.raw)
@@ -62,7 +62,7 @@ func TestOAuthBindingLoginAndUnbindJourney(t *testing.T) {
 
 	bound := ta.doH(t, "GET", "/api/v1/auth/oauth/callback?code=bind-code&state="+url.QueryEscape(state), nil,
 		map[string]string{"Cookie": "autosecrets_oauth_state=" + stateCookie + "; " + sessionCookie + "=" + cookie})
-	if bound.status != http.StatusFound || bound.header.Get("Location") != "/dashboard/login-and-security" {
+	if bound.status != http.StatusFound || bound.header.Get("Location") != "/dashboard/settings" {
 		t.Fatalf("binding callback: %d %s location=%s", bound.status, bound.raw, bound.header.Get("Location"))
 	}
 

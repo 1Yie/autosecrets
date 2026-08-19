@@ -1,20 +1,19 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiPatch } from "../../lib/api";
 import { API_PATHS } from "../../lib/constants/api-paths";
+import type { ManagedNode } from "./use-nodes";
 
-export interface UpdateNodeResponse {
-	id: string;
-	poll_interval_seconds: number;
+export interface UpdateNodeBody {
+	name?: string;
+	bundle_dir?: string;
+	poll_interval_seconds?: number;
 }
 
-/** Adjusts a Managed Node's settings; today only the Agent polling interval. */
 export function useUpdateNode(nodeId: string) {
 	const qc = useQueryClient();
 	return useMutation({
-		mutationFn: (pollIntervalSeconds: number) =>
-			apiPatch<UpdateNodeResponse>(API_PATHS.node(nodeId), {
-				poll_interval_seconds: pollIntervalSeconds,
-			}),
+		mutationFn: (body: UpdateNodeBody) =>
+			apiPatch<ManagedNode>(API_PATHS.node(nodeId), body),
 		onSuccess: () => qc.invalidateQueries({ queryKey: ["nodes"] }),
 	});
 }

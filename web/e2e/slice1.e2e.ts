@@ -30,7 +30,8 @@ test("single-Administrator authentication and Secret delivery journey", async ({
 	await page.getByRole("button", { name: "创建管理员" }).click();
 	await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
 
-	await page.goto("/dashboard/login-and-security");
+	await page.goto("/dashboard/settings");
+	await page.getByRole("tab", { name: "TOTP" }).click();
 	await expect(page.getByText("已停用")).toBeVisible();
 	await page.getByTestId("local-password").fill(PASSWORD);
 	await page.getByRole("button", { name: "启用本地 TOTP" }).click();
@@ -83,7 +84,8 @@ test("single-Administrator authentication and Secret delivery journey", async ({
 	await expect(page.getByRole("heading", { name: "概览" })).toBeVisible();
 
 	let currentCounter = await nextTOTPCounter(loginCounter);
-	await page.goto("/dashboard/login-and-security");
+	await page.goto("/dashboard/settings");
+	await page.getByRole("tab", { name: "外部登录" }).click();
 	await page.getByTestId("oidc-password").fill(PASSWORD);
 	await page.getByTestId("oidc-totp").fill(totpCode(secret, currentCounter));
 	await page.getByRole("button", { name: "绑定 External Identity" }).click();
@@ -125,13 +127,15 @@ test("single-Administrator authentication and Secret delivery journey", async ({
 	await page.getByTestId("recovery-code").fill(recoveryCodes[4]);
 	await page.getByRole("button", { name: "继续" }).click();
 	currentCounter = await nextTOTPCounter(currentCounter);
-	await page.goto("/dashboard/login-and-security");
+	await page.goto("/dashboard/settings");
+	await page.getByRole("tab", { name: "外部登录" }).click();
 	await page.getByTestId("oidc-password").fill(PASSWORD);
 	await page.getByTestId("oidc-totp").fill(totpCode(secret, currentCounter));
 	await page.getByRole("button", { name: "解除绑定" }).click();
 	await expect(page.getByText("未绑定")).toBeVisible();
 
 	currentCounter = await nextTOTPCounter(currentCounter);
+	await page.getByRole("tab", { name: "TOTP" }).click();
 	await page.getByTestId("local-password").fill(PASSWORD);
 	await page.getByTestId("local-totp").fill(totpCode(secret, currentCounter));
 	await page.getByRole("button", { name: "停用本地 TOTP" }).click();
@@ -246,7 +250,9 @@ async function secretDeliveryJourney(page: Page) {
 	await page.getByRole("button", { name: "添加服务器" }).click();
 	await page.getByTestId("node-name").fill(nodeName);
 	await page.getByTestId("node-bundle-dir").fill(bundleDir);
-	await page.getByRole("button", { name: "生成" }).click();
+	await page.getByRole("button", { name: "添加", exact: true }).click();
+	await expect(page.getByText("服务器已添加")).toBeVisible();
+	await page.getByRole("button", { name: "生成连接" }).click();
 	const command =
 		(await page.getByTestId("install-command").textContent()) ?? "";
 	expect(command).toContain(`--bundle-dir "${bundleDir}"`);

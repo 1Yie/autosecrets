@@ -48,6 +48,15 @@ export const handlers = [
 			oauth: { available: false, bound: false, login_available: false },
 		}),
 	),
+	http.get("/api/v1/auth/security", () =>
+		HttpResponse.json({
+			totp_login_required: false,
+			password_login_enabled: true,
+			password_login_available: true,
+			oidc: { available: false, bound: false },
+			oauth: { available: false, bound: false },
+		}),
+	),
 	http.post("/api/v1/auth/mfa-enrollment/verify", () =>
 		HttpResponse.json({
 			confirmation_token: "confirmation-token-1",
@@ -64,16 +73,66 @@ export const handlers = [
 			expires_at: "2026-08-12T02:00:00Z",
 		}),
 	),
+	http.post("/api/v1/nodes/:nodeId/install-command", () =>
+		HttpResponse.json({
+			command:
+				'curl -fsSL https://agent.example.com/agent/v1/install.sh | sudo bash -s -- --server https://agent.example.com --token one-time-token-abc --name "web-1"',
+			expires_at: "2026-08-12T02:00:00Z",
+		}),
+	),
 	http.get("/api/v1/nodes", () =>
 		HttpResponse.json({ items: [], next_cursor: "", total: 0 }),
 	),
+	http.post("/api/v1/nodes", async ({ request }) => {
+		const body = (await request.json()) as {
+			name?: string;
+			bundle_dir?: string;
+		};
+		return HttpResponse.json(
+			{
+				id: "node-new",
+				name: body.name ?? "node",
+				serial: "",
+				created_at: "2026-08-12T12:00:00Z",
+				last_seen_at: null,
+				desired_etag: "",
+				observed_revision: "",
+				last_result: "",
+				state: "never_online",
+				unassigned: true,
+				poll_interval_seconds: 15,
+				bundle_dir: body.bundle_dir ?? "",
+				enrolled: false,
+			},
+			{ status: 201 },
+		);
+	}),
 	http.patch("/api/v1/nodes/:nodeId", async ({ params, request }) => {
-		const body = (await request.json()) as { poll_interval_seconds?: number };
+		const body = (await request.json()) as {
+			name?: string;
+			bundle_dir?: string;
+			poll_interval_seconds?: number;
+		};
 		return HttpResponse.json({
 			id: String(params.nodeId),
+			name: body.name ?? "web-1",
+			serial: "serial-1",
+			created_at: "2026-08-12T12:00:00Z",
+			last_seen_at: "2026-08-12T12:00:00Z",
+			desired_etag: "",
+			observed_revision: "",
+			last_result: "",
+			state: "healthy",
+			unassigned: false,
 			poll_interval_seconds: body.poll_interval_seconds ?? 15,
+			bundle_dir: body.bundle_dir ?? "",
+			enrolled: true,
 		});
 	}),
+	http.delete(
+		"/api/v1/nodes/:nodeId",
+		() => new HttpResponse(null, { status: 204 }),
+	),
 	http.get("/api/v1/node-groups", () =>
 		HttpResponse.json({ items: [], next_cursor: "", total: 0 }),
 	),

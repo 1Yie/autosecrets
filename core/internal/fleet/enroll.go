@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,14 +17,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// handleInstallCommand issues a ten-minute, single-use Enrollment Token and
-// renders the Install Command. The Token appears in this response only.
-func (h *Handler) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
-	if h.cfg.PublicAgentURL == "" {
-		middleware.WriteError(w, http.StatusServiceUnavailable, "unavailable",
-			"CORE_PUBLIC_AGENT_URL is not configured")
-		return
+func validateBundleDir(value string) error {
+	if value == "" {
+		return nil
 	}
+	if !strings.HasPrefix(value, "~") && !strings.HasPrefix(value, "/") {
+		return errors.New("bundle_dir must be an absolute path or start with ~/")
+	}
+	return nil
+}
+
+// handleInstallCommand reserves a pending Managed Node, issues a ten-minute
+// single-use Enrollment Token, and renders the Install Command.
+func (h *Handler) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name      string `json:"name"`
 		BundleDir string `json:"bundle_dir"`
@@ -32,10 +38,48 @@ func (h *Handler) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
 	if !middleware.ValidName(body.Name, 64) {
 		body.Name = "node-" + uuid.NewString()[:8]
 	}
-	if body.BundleDir != "" && !strings.HasPrefix(body.BundleDir, "~") &&
-		!strings.HasPrefix(body.BundleDir, "/") {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request",
-			"bundle_dir must be an absolute path or start with ~/")
+	if err := validateBundleDir(body.BundleDir); err != nil {
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	id := uuid.NewString()
+	name := strings.TrimSpace(body.Name)
+	if err := h.store.CreatePendingNode(r.Context(), id, name, strings.TrimSpace(body.BundleDir)); err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	h.writeInstallCommand(w, r, id, name, strings.TrimSpace(body.BundleDir))
+}
+
+func (h *Handler) handleNodeInstallCommand(w http.ResponseWriter, r *http.Request) {
+	node, err := h.store.GetNode(r.Context(), r.PathValue("nodeID"))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			middleware.WriteError(w, http.StatusNotFound, "not_found", "node not found")
+			return
+		}
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+		return
+	}
+	var body struct {
+		BundleDir string `json:"bundle_dir"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	bundleDir := strings.TrimSpace(body.BundleDir)
+	if bundleDir == "" {
+		bundleDir = node.BundleDir
+	}
+	if err := validateBundleDir(bundleDir); err != nil {
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	h.writeInstallCommand(w, r, node.ID, node.Name, bundleDir)
+}
+
+func (h *Handler) writeInstallCommand(w http.ResponseWriter, r *http.Request, nodeID, name, bundleDir string) {
+	if h.cfg.PublicAgentURL == "" {
+		middleware.WriteError(w, http.StatusServiceUnavailable, "unavailable",
+			"CORE_PUBLIC_AGENT_URL is not configured")
 		return
 	}
 	token, err := crypto.NewSecret(192)
@@ -44,7 +88,7 @@ func (h *Handler) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expiresAt := h.now().Add(tokenTTL)
-	if err := h.store.CreateEnrollmentToken(r.Context(), crypto.HashToken(token), strings.TrimSpace(body.Name), expiresAt); err != nil {
+	if err := h.store.CreateNodeEnrollmentToken(r.Context(), crypto.HashToken(token), name, nodeID, expiresAt); err != nil {
 		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
@@ -55,14 +99,14 @@ func (h *Handler) handleInstallCommand(w http.ResponseWriter, r *http.Request) {
 		curl = "curl -k -fsSL"
 		extra = " --insecure"
 	}
-	if body.BundleDir != "" {
-		extra += fmt.Sprintf(" --bundle-dir %q", body.BundleDir)
+	if bundleDir != "" {
+		extra += fmt.Sprintf(" --bundle-dir %q", bundleDir)
 	}
 	command := fmt.Sprintf(
 		"%s %s%s/install.sh | sudo bash -s -- --server %s --token %s --name %q%s",
-		curl, base, h.agentBase, base, token, strings.TrimSpace(body.Name), extra)
+		curl, base, h.agentBase, base, token, name, extra)
 	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
-		Actor: middleware.ActorFrom(r), Action: "token.issue", Resource: "",
+		Actor: middleware.ActorFrom(r), Action: "token.issue", Resource: nodeID,
 		Result:        "expires=" + expiresAt.UTC().Format(time.RFC3339),
 		CorrelationID: middleware.CorrelationID(h.now, r),
 	})
@@ -154,13 +198,25 @@ func (h *Handler) handleEnroll(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = "node-" + uuid.NewString()[:8]
 	}
-	nodeID := uuid.NewString()
+	nodeID := tokenRow.NodeID
+	if nodeID == "" {
+		nodeID = uuid.NewString()
+	}
 	certPEM, serial, expiresAt, err := h.ca.IssueAgentCert(nodeID, []byte(body.CSR), certTTL)
 	if err != nil {
 		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "invalid CSR")
 		return
 	}
-	if err := h.store.RegisterNode(r.Context(), nodeID, name, serial, body.AgePubkey, string(certPEM), expiresAt); err != nil {
+	if tokenRow.NodeID != "" {
+		if err := h.store.ActivatePendingNode(r.Context(), nodeID, serial, body.AgePubkey, string(certPEM), expiresAt); err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				middleware.WriteError(w, http.StatusForbidden, "forbidden", "invalid, expired, or already-used token")
+				return
+			}
+			middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
+			return
+		}
+	} else if err := h.store.RegisterNode(r.Context(), nodeID, name, serial, body.AgePubkey, string(certPEM), expiresAt); err != nil {
 		middleware.WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 		return
 	}
@@ -300,7 +356,8 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable --now autosecrets-agent.service
+  systemctl enable autosecrets-agent.service
+  systemctl restart autosecrets-agent.service
   echo "==> Agent installed and running via systemd (autosecrets-agent.service)"
 else
   echo "==> First convergence pass"

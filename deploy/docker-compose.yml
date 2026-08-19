@@ -24,6 +24,8 @@ services:
       context: ../core
       args:
         SOURCE_COMMIT: ${SOURCE_COMMIT:-}
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        GOSUMDB: ${GOSUMDB:-sum.golang.org}
     restart: unless-stopped
     depends_on:
       postgres:

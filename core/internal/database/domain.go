@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"autosecrets.dev/core/internal/database/gen"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -721,6 +722,17 @@ func (s *Store) AdvanceDesiredRevision(ctx context.Context, appID, envID, revisi
 	})
 }
 
+const pendingSerialPrefix = "pending:"
+
+// PendingSerial reserves a unique serial for a Managed Node that has not
+// enrolled yet.
+func PendingSerial(nodeID string) string { return pendingSerialPrefix + nodeID }
+
+// IsPendingSerial reports whether the node is reserved but not enrolled.
+func IsPendingSerial(serial string) bool {
+	return strings.HasPrefix(serial, pendingSerialPrefix)
+}
+
 type Node struct {
 	ID                  string     `json:"id"`
 	Name                string     `json:"name"`
@@ -732,6 +744,8 @@ type Node struct {
 	ObservedRevision    string     `json:"observed_revision"`
 	LastResult          string     `json:"last_result"`
 	PollIntervalSeconds int        `json:"poll_interval_seconds"`
+	BundleDir           string     `json:"bundle_dir"`
+	Enrolled            bool       `json:"enrolled"`
 }
 
 func (s *Store) ListNode(ctx context.Context) ([]Node, error) {
@@ -741,12 +755,7 @@ func (s *Store) ListNode(ctx context.Context) ([]Node, error) {
 	}
 	out := make([]Node, len(rows))
 	for i, r := range rows {
-		out[i] = Node{
-			ID: r.ID, Name: r.Name, Serial: r.Serial, CreatedAt: r.CreatedAt,
-			LastSeenAt: tsPtr(r.LastSeenAt), DesiredETag: r.DesiredEtag,
-			ObservedRevision: r.ObservedRevision, LastResult: r.LastResult,
-			PollIntervalSeconds: int(r.PollIntervalSeconds),
-		}
+		out[i] = nodeFromList(r)
 	}
 	return out, nil
 }
@@ -757,11 +766,43 @@ func (s *Store) NodeBySerial(ctx context.Context, serial string) (*Node, error) 
 		return nil, mapNoRows(err)
 	}
 	return &Node{
-		ID: r.ID, Name: r.Name, Serial: r.Serial, AgePubkey: r.AgePubkey, CreatedAt: r.CreatedAt,
+		ID: r.ID, Name: r.Name, Serial: publicSerial(r.Serial), AgePubkey: r.AgePubkey, CreatedAt: r.CreatedAt,
 		LastSeenAt: tsPtr(r.LastSeenAt), DesiredETag: r.DesiredEtag,
 		ObservedRevision: r.ObservedRevision, LastResult: r.LastResult,
-		PollIntervalSeconds: int(r.PollIntervalSeconds),
+		PollIntervalSeconds: int(r.PollIntervalSeconds), BundleDir: r.BundleDir,
+		Enrolled: !IsPendingSerial(r.Serial),
 	}, nil
+}
+
+func (s *Store) GetNode(ctx context.Context, id string) (*Node, error) {
+	r, err := s.q.GetNode(ctx, id)
+	if err != nil {
+		return nil, mapNoRows(err)
+	}
+	return &Node{
+		ID: r.ID, Name: r.Name, Serial: publicSerial(r.Serial), CreatedAt: r.CreatedAt,
+		LastSeenAt: tsPtr(r.LastSeenAt), DesiredETag: r.DesiredEtag,
+		ObservedRevision: r.ObservedRevision, LastResult: r.LastResult,
+		PollIntervalSeconds: int(r.PollIntervalSeconds), BundleDir: r.BundleDir,
+		Enrolled: !IsPendingSerial(r.Serial),
+	}, nil
+}
+
+func nodeFromList(r gen.ListNodeRow) Node {
+	return Node{
+		ID: r.ID, Name: r.Name, Serial: publicSerial(r.Serial), CreatedAt: r.CreatedAt,
+		LastSeenAt: tsPtr(r.LastSeenAt), DesiredETag: r.DesiredEtag,
+		ObservedRevision: r.ObservedRevision, LastResult: r.LastResult,
+		PollIntervalSeconds: int(r.PollIntervalSeconds), BundleDir: r.BundleDir,
+		Enrolled: !IsPendingSerial(r.Serial),
+	}
+}
+
+func publicSerial(serial string) string {
+	if IsPendingSerial(serial) {
+		return ""
+	}
+	return serial
 }
 
 func (s *Store) TouchNode(ctx context.Context, nodeID string, observedRevision, lastResult string, at time.Time) error {
@@ -789,6 +830,47 @@ func (s *Store) SetNodePollInterval(ctx context.Context, nodeID string, seconds 
 	return nil
 }
 
+func (s *Store) RenameNode(ctx context.Context, nodeID, name string) error {
+	rows, err := s.q.RenameNode(ctx, gen.RenameNodeParams{ID: nodeID, Name: name})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) SetNodeBundleDir(ctx context.Context, nodeID, bundleDir string) error {
+	rows, err := s.q.SetNodeBundleDir(ctx, gen.SetNodeBundleDirParams{ID: nodeID, BundleDir: bundleDir})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteNode(ctx context.Context, nodeID string) error {
+	rows, err := s.q.DeleteNode(ctx, nodeID)
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CreatePendingNode reserves a Managed Node that has not enrolled yet.
+func (s *Store) CreatePendingNode(ctx context.Context, id, name, bundleDir string) error {
+	return s.q.RegisterNode(ctx, gen.RegisterNodeParams{
+		ID: id, Name: name, Serial: PendingSerial(id), BundleDir: bundleDir,
+		CertExpiresAt: time.Now().UTC(),
+	})
+}
+
 // --- Enrollment tokens -----------------------------------------------------
 
 type EnrollmentToken struct {
@@ -796,11 +878,18 @@ type EnrollmentToken struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
+	NodeID    string    `json:"node_id,omitempty"`
 }
 
 func (s *Store) CreateEnrollmentToken(ctx context.Context, tokenHash, name string, expiresAt time.Time) error {
 	return s.q.CreateEnrollmentToken(ctx, gen.CreateEnrollmentTokenParams{
 		TokenHash: tokenHash, Name: name, ExpiresAt: expiresAt,
+	})
+}
+
+func (s *Store) CreateNodeEnrollmentToken(ctx context.Context, tokenHash, name, nodeID string, expiresAt time.Time) error {
+	return s.q.CreateNodeEnrollmentToken(ctx, gen.CreateNodeEnrollmentTokenParams{
+		TokenHash: tokenHash, Name: name, ExpiresAt: expiresAt, NodeID: mustPGUUID(nodeID),
 	})
 }
 
@@ -816,7 +905,10 @@ func (s *Store) ConsumeEnrollmentToken(ctx context.Context, tokenHash string, no
 	if err != nil {
 		return nil, mapNoRows(err)
 	}
-	t := EnrollmentToken{TokenHash: r.TokenHash, Name: r.Name, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt}
+	t := EnrollmentToken{
+		TokenHash: r.TokenHash, Name: r.Name, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
+		NodeID: pgUUIDString(r.NodeID),
+	}
 	if !t.ExpiresAt.After(now) {
 		return nil, ErrConflict
 	}
@@ -839,6 +931,34 @@ func (s *Store) RegisterNode(ctx context.Context, id, name, serial, agePubkey, c
 	return s.q.RegisterNode(ctx, gen.RegisterNodeParams{
 		ID: id, Name: name, Serial: serial, AgePubkey: agePubkey, CertPem: certPEM, CertExpiresAt: certExpiresAt,
 	})
+}
+
+func (s *Store) ActivatePendingNode(ctx context.Context, id, serial, agePubkey, certPEM string, certExpiresAt time.Time) error {
+	rows, err := s.q.ActivatePendingNode(ctx, gen.ActivatePendingNodeParams{
+		ID: id, Serial: serial, AgePubkey: agePubkey, CertPem: certPEM, CertExpiresAt: certExpiresAt,
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func pgUUIDString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return uuid.UUID(id.Bytes).String()
+}
+
+func mustPGUUID(id string) pgtype.UUID {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}
 }
 
 // --- Desired State (delivery) ----------------------------------------------

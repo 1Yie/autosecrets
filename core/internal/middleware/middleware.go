@@ -52,6 +52,7 @@ const (
 	CodeSecondFactorRequired  = "second_factor_required"
 	CodeChallengeExpired      = "challenge_expired"
 	CodeRateLimited           = "rate_limited"
+	CodePasswordLoginDisabled = "password_login_disabled"
 )
 
 // --- Session authentication -----------------------------------------------

@@ -9,8 +9,6 @@ import {
 import {
 	ChevronRight,
 	ChevronsUpDown,
-	Info,
-	KeyRound,
 	LayoutDashboard,
 	LogOut,
 	MonitorCog,
@@ -18,12 +16,12 @@ import {
 	PanelLeftOpen,
 	Server,
 	ScrollText,
+	Settings2,
 	ShieldCheck,
 } from "lucide-react";
 import { useMe, type Me } from "../hooks/auth/use-me";
 import { useLogout } from "../hooks/auth/use-logout";
 import { useApplication } from "../hooks/applications/use-application";
-import { AboutDialog } from "../components/about-dialog";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
 import { ThemeToggle } from "../components/theme-toggle";
@@ -214,7 +212,7 @@ const sectionLabels: Record<string, string> = {
 	apps: "应用",
 	nodes: "节点",
 	audit: "审计",
-	"login-and-security": "登录与安全",
+	settings: "设置",
 };
 
 /** Header breadcrumb derived from the current route, e.g. 应用 / payments. */
@@ -259,78 +257,60 @@ function UserMenu({
 }) {
 	const logout = useLogout();
 	const navigate = useNavigate();
-	const [aboutOpen, setAboutOpen] = useState(false);
 	return (
-		<>
-			<Menu>
-				<MenuTrigger
-					className={cn(
-						"flex w-full items-center gap-2 rounded-md text-left opacity-90 hover:bg-sidebar-accent hover:opacity-100",
-						collapsed ? "justify-center px-0 py-2" : "px-2 py-1.5",
-					)}
-				>
+		<Menu>
+			<MenuTrigger
+				className={cn(
+					"flex w-full items-center gap-2 rounded-md text-left opacity-90 hover:bg-sidebar-accent hover:opacity-100",
+					collapsed ? "justify-center px-0 py-2" : "px-2 py-1.5",
+				)}
+			>
+				<span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium">
+					{member.username.slice(0, 1).toUpperCase()}
+				</span>
+				{!collapsed && (
+					<>
+						<span
+							className="min-w-0 flex-1 truncate text-sm font-medium"
+							data-testid="current-user"
+						>
+							{member.username}
+						</span>
+						<ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
+					</>
+				)}
+			</MenuTrigger>
+			<MenuPopup side="right" align="start" sideOffset={8}>
+				<div className="flex items-center gap-2 px-2 py-1.5">
 					<span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium">
 						{member.username.slice(0, 1).toUpperCase()}
 					</span>
-					{!collapsed && (
-						<>
-							<span className="min-w-0 flex-1">
-								<span
-									className="block truncate text-sm font-medium"
-									data-testid="current-user"
-								>
-									{member.username}
-								</span>
-								<span className="block truncate text-xs opacity-60">{member.role}</span>
-							</span>
-							<ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
-						</>
-					)}
-				</MenuTrigger>
-				<MenuPopup side="right" align="start" sideOffset={8}>
-					<div className="flex items-center gap-2 px-2 py-1.5">
-						<span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-medium">
-							{member.username.slice(0, 1).toUpperCase()}
-						</span>
-						<div className="min-w-0">
-							<div className="truncate text-sm font-medium">{member.username}</div>
-							<div className="truncate text-xs text-muted-foreground">
-								{member.role}
-							</div>
-						</div>
+					<div className="min-w-0 truncate text-sm font-medium">
+						{member.username}
 					</div>
-					<MenuSeparator />
-					<MenuItem
-						data-testid="account-security"
-						onClick={() => navigate("/dashboard/login-and-security")}
-					>
-						<KeyRound className="size-4" />
-						登录与安全
-					</MenuItem>
-					<MenuItem
-						closeOnClick
-						data-testid="about"
-						onClick={() => setAboutOpen(true)}
-					>
-						<Info className="size-4" />
-						关于 AutoSecrets
-					</MenuItem>
-					<MenuItem
-						variant="destructive"
-						data-testid="logout"
-						onClick={() =>
-							logout.mutate(undefined, {
-								onSuccess: () => navigate("/auth/login"),
-							})
-						}
-					>
-						<LogOut className="size-4" />
-						退出登录
-					</MenuItem>
-				</MenuPopup>
-			</Menu>
-			<AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-		</>
+				</div>
+				<MenuSeparator />
+				<MenuItem
+					data-testid="account-security"
+					onClick={() => navigate("/dashboard/settings")}
+				>
+					<Settings2 className="size-4" />
+					设置
+				</MenuItem>
+				<MenuItem
+					variant="destructive"
+					data-testid="logout"
+					onClick={() =>
+						logout.mutate(undefined, {
+							onSuccess: () => navigate("/auth/login"),
+						})
+					}
+				>
+					<LogOut className="size-4" />
+					退出登录
+				</MenuItem>
+			</MenuPopup>
+		</Menu>
 	);
 }
 

@@ -1,14 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
+  Info,
   KeyRound,
   Link2,
   Lock,
+  Settings2,
   ShieldCheck,
   ShieldOff,
   UserRound,
 } from "lucide-react";
+import { AboutAutosecrets } from "../../components/about-autosecrets";
 import { useDocumentTitle } from "../../hooks/use-document-title";
 import { useMe } from "../../hooks/auth/use-me";
 import {
@@ -25,7 +29,19 @@ import {
 } from "../../components/ui/input-otp";
 import { Badge } from "../../components/ui/badge";
 import { Skeleton } from "../../components/ui/skeleton";
-import { Dialog, DialogPopup } from "../../components/ui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../../components/ui/dialog";
+import { Label } from "../../components/ui/label";
+import { Switch } from "../../components/ui/switch";
+import { Tabs, TabsList, TabsPanel, TabsTab } from "../../components/ui/tabs";
 import {
   Frame,
   FrameHeader,
@@ -39,6 +55,7 @@ import {
   useDeleteOAuthBinding,
   useDeleteOIDCBinding,
   useDisableTOTP,
+  useSetPasswordLogin,
   useStartOAuthBinding,
   useStartOIDCBinding,
   useStartTOTPEnrollment,
@@ -52,6 +69,21 @@ import {
   type ChangeUsernameForm,
 } from "../../lib/constants/schemas";
 import { toastSuccess } from "../../lib/toast";
+
+const SECURITY_SECTIONS = [
+  "account",
+  "totp",
+  "external",
+  "login",
+  "about",
+] as const;
+type SecuritySection = (typeof SECURITY_SECTIONS)[number];
+
+function parseSecuritySection(value: string | null): SecuritySection {
+  return SECURITY_SECTIONS.includes(value as SecuritySection)
+    ? (value as SecuritySection)
+    : "account";
+}
 
 function providerUnavailableMessage(
   kind: "oauth" | "oidc",
@@ -72,9 +104,12 @@ function providerUnavailableMessage(
 export function SecurityPage() {
   const security = useAuthenticationSecurity();
   const me = useMe();
-  useDocumentTitle("登录与安全");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const section = parseSecuritySection(searchParams.get("section"));
+  useDocumentTitle("设置");
   const startTOTP = useStartTOTPEnrollment();
   const disableTOTP = useDisableTOTP();
+  const setPasswordLogin = useSetPasswordLogin();
   const startOIDCBinding = useStartOIDCBinding();
   const deleteOIDCBinding = useDeleteOIDCBinding();
   const startOAuthBinding = useStartOAuthBinding();
@@ -88,18 +123,9 @@ export function SecurityPage() {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-40" />
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <Skeleton className="h-72" />
-            <Skeleton className="h-72" />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Skeleton className="h-64" />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Skeleton className="h-64" />
-            <Skeleton className="h-64" />
-          </div>
+        <div className="flex gap-6">
+          <Skeleton className="h-48 w-44 shrink-0" />
+          <Skeleton className="h-72 min-w-0 flex-1" />
         </div>
       </div>
     );
@@ -107,7 +133,7 @@ export function SecurityPage() {
   if (security.isError || !security.data) {
     return (
       <div className="space-y-3">
-        <h1 className="text-xl font-bold">登录与安全</h1>
+        <h1 className="text-xl font-bold">设置</h1>
         <p role="alert" className="text-sm text-red-500">
           无法加载安全设置
         </p>
@@ -118,32 +144,76 @@ export function SecurityPage() {
     );
   }
   const totpRequired = security.data.totp_login_required;
+  const passwordLoginEnabled = security.data.password_login_enabled ?? true;
   const oidc = security.data.oidc;
   const oauth = security.data.oauth ?? {
     available: false,
     bound: false,
     configuration_error: "OAuth is not configured",
   };
+  const oidcLoginAvailable = oidc.available && oidc.bound;
+  const oauthLoginAvailable = oauth.available && oauth.bound;
+  const canDisablePasswordLogin = oidcLoginAvailable || oauthLoginAvailable;
   const currentUsername = me.data?.member?.username ?? "";
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h1 className="text-xl font-bold">登录与安全</h1>
+        <h1 className="text-xl font-bold">设置</h1>
       </div>
 
-      <div className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
-          <ChangeUsernameCard
-            currentUsername={currentUsername}
-            totpRequired={totpRequired}
-          />
-          <ChangePasswordCard totpRequired={totpRequired} />
-        </div>
+      <Tabs
+        orientation="vertical"
+        value={section}
+        onValueChange={(value) => {
+          const next = parseSecuritySection(value);
+          setSearchParams(next === "account" ? {} : { section: next }, {
+            replace: true,
+          });
+        }}
+        className="items-start gap-6"
+      >
+        <TabsList className="shrink-0">
+          <TabsTab value="account">
+            <UserRound />
+            账号
+          </TabsTab>
+          <TabsTab value="totp">
+            <ShieldCheck />
+            TOTP
+          </TabsTab>
+          <TabsTab value="external">
+            <Link2 />
+            外部登录
+          </TabsTab>
+          <TabsTab value="login">
+            <Settings2 />
+            登录配置
+          </TabsTab>
+          <TabsTab value="about">
+            <Info />
+            关于
+          </TabsTab>
+        </TabsList>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <Frame className="h-full min-w-0 w-full">
-            <FramePanel className="flex-1">
+        <TabsPanel value="account" className="min-w-0 space-y-4">
+          <SectionIntro title="账号" description="修改管理员用户名和密码。" />
+          <div className="grid gap-4 md:grid-cols-2">
+            <ChangeUsernameCard
+              currentUsername={currentUsername}
+              totpRequired={totpRequired}
+            />
+            <ChangePasswordCard totpRequired={totpRequired} />
+          </div>
+        </TabsPanel>
+
+        <TabsPanel value="totp" className="min-w-0 space-y-4">
+          <SectionIntro
+            title="TOTP"
+            description="用身份验证器生成的动态验证码作为第二步登录。"
+          />
+          <Frame className="min-w-0 w-full">
+            <FramePanel>
               <FrameHeader className="px-0 pt-0">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
@@ -152,7 +222,7 @@ export function SecurityPage() {
                     ) : (
                       <ShieldOff className="size-5 shrink-0" />
                     )}
-                    <FrameTitle className="text-base">TOTP</FrameTitle>
+                    <FrameTitle className="text-base">本地 TOTP</FrameTitle>
                   </div>
                   <Badge variant={totpRequired ? "success" : "outline"}>
                     {totpRequired ? "已启用" : "已停用"}
@@ -202,27 +272,56 @@ export function SecurityPage() {
               </div>
             </FramePanel>
           </Frame>
-        </div>
+        </TabsPanel>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <ExternalProviderCard
-            title="OAuth"
-            kind="oauth"
-            provider={oauth}
-            totpRequired={totpRequired}
-            startBinding={startOAuthBinding}
-            deleteBinding={deleteOAuthBinding}
+        <TabsPanel value="external" className="min-w-0 space-y-4">
+          <SectionIntro
+            title="外部登录"
+            description="绑定 OAuth 或 OpenID Connect 后，可以用外部身份登录。"
           />
-          <ExternalProviderCard
-            title="OpenID Connect"
-            kind="oidc"
-            provider={oidc}
-            totpRequired={totpRequired}
-            startBinding={startOIDCBinding}
-            deleteBinding={deleteOIDCBinding}
+          <div className="grid gap-4 md:grid-cols-2">
+            <ExternalProviderCard
+              title="OAuth"
+              kind="oauth"
+              provider={oauth}
+              totpRequired={totpRequired}
+              lastBindingLocked={!passwordLoginEnabled && !oidcLoginAvailable}
+              startBinding={startOAuthBinding}
+              deleteBinding={deleteOAuthBinding}
+            />
+            <ExternalProviderCard
+              title="OpenID Connect"
+              kind="oidc"
+              provider={oidc}
+              totpRequired={totpRequired}
+              lastBindingLocked={!passwordLoginEnabled && !oauthLoginAvailable}
+              startBinding={startOIDCBinding}
+              deleteBinding={deleteOIDCBinding}
+            />
+          </div>
+        </TabsPanel>
+
+        <TabsPanel value="login" className="min-w-0 space-y-4">
+          <SectionIntro
+            title="登录配置"
+            description="选择登录页是否还提供用户名和密码。"
           />
-        </div>
-      </div>
+          <PasswordLoginOption
+            enabled={passwordLoginEnabled}
+            canDisable={canDisablePasswordLogin}
+            totpRequired={totpRequired}
+            setPasswordLogin={setPasswordLogin}
+          />
+        </TabsPanel>
+
+        <TabsPanel value="about" className="min-w-0 space-y-4">
+          <SectionIntro
+            title="关于 AutoSecrets"
+            description="AutoSecrets 是一个轻量级密钥托管服务。"
+          />
+          <AboutAutosecrets />
+        </TabsPanel>
+      </Tabs>
 
       <Dialog
         open={enrollment !== null}
@@ -246,11 +345,162 @@ export function SecurityPage() {
   );
 }
 
+function SectionIntro({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      <p className="text-sm text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function PasswordLoginOption({
+  enabled,
+  canDisable,
+  totpRequired,
+  setPasswordLogin,
+}: {
+  enabled: boolean;
+  canDisable: boolean;
+  totpRequired: boolean;
+  setPasswordLogin: {
+    isPending: boolean;
+    isError: boolean;
+    error: unknown;
+    reset: () => void;
+    mutate: (
+      body: { enabled: boolean } & CredentialProof,
+      options: { onSuccess: () => void },
+    ) => void;
+  };
+}) {
+  const switchId = useId();
+  const [proof, setProof] = useState<CredentialProof>({ password: "" });
+  const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null);
+  const disableLocked = enabled && !canDisable;
+  const proofReady =
+    Boolean(proof.password) && (!totpRequired || Boolean(proof.totp_code));
+  const confirmLabel = pendingEnabled ? "启用密码登录" : "关闭密码登录";
+
+  return (
+    <>
+      <Frame className="min-w-0 w-full">
+        <FramePanel>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 flex-col gap-1">
+              <Label htmlFor={switchId}>密码登录</Label>
+              <p className="text-muted-foreground text-xs">
+                {enabled
+                  ? "关闭后只能通过已绑定的 OAuth 或 OpenID Connect 登录。密码仍用于修改安全设置。"
+                  : "当前不能用用户名和密码登录。外部登录不可用时会自动恢复。"}
+              </p>
+              {disableLocked && (
+                <p className="text-muted-foreground text-xs">
+                  需要先绑定可用的 OAuth 或 OpenID Connect
+                </p>
+              )}
+            </div>
+            <Switch
+              id={switchId}
+              data-testid="password-login-switch"
+              checked={enabled}
+              disabled={disableLocked || setPasswordLogin.isPending}
+              onCheckedChange={(next) => {
+                if (next === enabled) {
+                  return;
+                }
+                if (!next && !canDisable) {
+                  return;
+                }
+                setProof({ password: "" });
+                setPendingEnabled(next);
+              }}
+            />
+          </div>
+        </FramePanel>
+      </Frame>
+
+      <Dialog
+        open={pendingEnabled !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingEnabled(null);
+            setProof({ password: "" });
+            setPasswordLogin.reset();
+          }
+        }}
+      >
+        <DialogPopup>
+          <DialogHeader>
+            <DialogTitle>{confirmLabel}</DialogTitle>
+            <DialogDescription>
+              {pendingEnabled
+                ? "确认后可以再用用户名和密码登录。"
+                : "确认后登录页将只保留已绑定的外部登录。"}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            <CredentialProofFields
+              idPrefix="password-login"
+              value={proof}
+              onChange={setProof}
+              requireTOTP={totpRequired}
+              passwordLabel="当前密码"
+            />
+            {setPasswordLogin.isError && (
+              <p role="alert" className="text-sm text-destructive">
+                {String(setPasswordLogin.error as Error)}
+              </p>
+            )}
+          </DialogPanel>
+          <DialogFooter>
+            <DialogClose render={<Button variant="ghost" type="button" />}>
+              取消
+            </DialogClose>
+            <Button
+              type="button"
+              variant={pendingEnabled ? "default" : "destructive"}
+              loading={setPasswordLogin.isPending}
+              disabled={!proofReady || pendingEnabled === null}
+              onClick={() => {
+                if (pendingEnabled === null) {
+                  return;
+                }
+                setPasswordLogin.mutate(
+                  { enabled: pendingEnabled, ...proof },
+                  {
+                    onSuccess: () => {
+                      setPendingEnabled(null);
+                      setProof({ password: "" });
+                      toastSuccess(
+                        pendingEnabled ? "已启用密码登录" : "已关闭密码登录",
+                      );
+                    },
+                  },
+                );
+              }}
+            >
+              {confirmLabel}
+            </Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+    </>
+  );
+}
+
 function ExternalProviderCard({
   title,
   kind,
   provider,
   totpRequired,
+  lastBindingLocked,
   startBinding,
   deleteBinding,
 }: {
@@ -258,6 +508,7 @@ function ExternalProviderCard({
   kind: "oauth" | "oidc";
   provider: ExternalProviderSecurity;
   totpRequired: boolean;
+  lastBindingLocked: boolean;
   startBinding: {
     isPending: boolean;
     isError: boolean;
@@ -325,6 +576,11 @@ function ExternalProviderCard({
               requireTOTP={totpRequired}
               passwordLabel="当前密码"
             />
+            {lastBindingLocked && (
+              <p className="text-sm text-muted-foreground">
+                请先启用密码登录，再解除最后一个外部登录
+              </p>
+            )}
             {(startBinding.isError || deleteBinding.isError) && (
               <p role="alert" className="text-sm text-destructive">
                 {String((startBinding.error ?? deleteBinding.error) as Error)}
@@ -334,7 +590,11 @@ function ExternalProviderCard({
               <Button
                 variant="destructive-outline"
                 loading={deleteBinding.isPending}
-                disabled={!proof.password || (totpRequired && !proof.totp_code)}
+                disabled={
+                  lastBindingLocked ||
+                  !proof.password ||
+                  (totpRequired && !proof.totp_code)
+                }
                 onClick={() => deleteBinding.mutate(proof)}
               >
                 解除绑定
@@ -616,7 +876,7 @@ function ProofOTPField({
   );
 }
 
-type CredentialProofIdPrefix = "local" | "oidc" | "oauth";
+type CredentialProofIdPrefix = "local" | "oidc" | "oauth" | "password-login";
 
 function CredentialProofFields({
   idPrefix,

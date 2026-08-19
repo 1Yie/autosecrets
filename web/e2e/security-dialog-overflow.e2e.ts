@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("TOTP enrollment dialog does not scroll horizontally", async ({ page }) => {
+test("TOTP enrollment dialog does not scroll horizontally", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const username = "a".repeat(64);
 
@@ -33,13 +35,18 @@ test("TOTP enrollment dialog does not scroll horizontally", async ({ page }) => 
     }),
   );
 
-  await page.goto("/dashboard/login-and-security");
+  await page.goto("/dashboard/settings");
+  await page.getByRole("tab", { name: "TOTP" }).click();
   await page.getByTestId("local-password").fill("correct-horse-42");
   await page.getByRole("button", { name: "启用本地 TOTP" }).click();
 
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("heading", { name: "验证动态验证码" })).toBeVisible();
-  await expect(dialog.getByText(/在身份验证器中添加以下 TOTP 条目/)).toHaveCount(0);
+  await expect(
+    dialog.getByRole("heading", { name: "验证动态验证码" }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText(/在身份验证器中添加以下 TOTP 条目/),
+  ).toHaveCount(0);
   await expect(dialog.getByLabel("动态验证码")).toBeVisible();
   await dialog.getByText("无法扫码？手动输入").click();
 
@@ -48,11 +55,20 @@ test("TOTP enrollment dialog does not scroll horizontally", async ({ page }) => 
   await expect(manualURI).toBeVisible();
   await dialog.getByLabel("动态验证码").click();
   await expect
-    .poll(() => viewport.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .poll(() =>
+      viewport.evaluate((element) => element.scrollWidth - element.clientWidth),
+    )
     .toBe(0);
   await expect
-    .poll(() => manualURI.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .poll(() =>
+      manualURI.evaluate(
+        (element) => element.scrollWidth - element.clientWidth,
+      ),
+    )
     .toBeLessThanOrEqual(0);
-  await expect(dialog.locator('[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]'))
-    .toHaveCount(0);
+  await expect(
+    dialog.locator(
+      '[data-slot="scroll-area-scrollbar"][data-orientation="horizontal"]',
+    ),
+  ).toHaveCount(0);
 });

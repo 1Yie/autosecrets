@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { SecurityPage } from "../../../pages/security";
 import { ToastProvider } from "../../../components/ui/toast";
@@ -12,12 +13,20 @@ function renderPage() {
     defaultOptions: { queries: { retry: false } },
   });
   return render(
-    <ToastProvider position="top-center">
-      <QueryClientProvider client={client}>
-        <SecurityPage />
-      </QueryClientProvider>
-    </ToastProvider>,
+    <MemoryRouter initialEntries={["/dashboard/settings"]}>
+      <ToastProvider position="top-center">
+        <QueryClientProvider client={client}>
+          <SecurityPage />
+        </QueryClientProvider>
+      </ToastProvider>
+    </MemoryRouter>,
   );
+}
+
+async function openSection(name: string) {
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("tab", { name }));
+  return user;
 }
 
 describe("SecurityPage", () => {
@@ -31,7 +40,8 @@ describe("SecurityPage", () => {
       ),
     );
     renderPage();
-    expect(await screen.findByText("TOTP")).toBeVisible();
+    await openSection("TOTP");
+    expect(await screen.findByText("本地 TOTP")).toBeVisible();
     expect(screen.getByText("已停用")).toBeVisible();
     expect(screen.queryByLabelText("当前动态验证码")).toBeNull();
     expect(
@@ -54,12 +64,14 @@ describe("SecurityPage", () => {
       ),
     );
     renderPage();
-    expect(await screen.findByText("TOTP")).toBeVisible();
+    await openSection("TOTP");
+    expect(await screen.findByText("本地 TOTP")).toBeVisible();
     expect(screen.getByText("已启用")).toBeVisible();
-    expect(screen.getAllByLabelText("当前动态验证码")).toHaveLength(4);
+    expect(screen.getByTestId("local-totp")).toBeVisible();
     expect(
       screen.getByRole("button", { name: "停用本地 TOTP" }),
     ).toBeDisabled();
+    await openSection("外部登录");
     expect(screen.getByRole("button", { name: "解除绑定" })).toBeDisabled();
   });
 
@@ -77,6 +89,7 @@ describe("SecurityPage", () => {
       ),
     );
     renderPage();
+    await openSection("外部登录");
     expect(await screen.findByText("尚未配置 OpenID Connect")).toBeVisible();
     expect(screen.getByText("尚未配置 OAuth")).toBeVisible();
     expect(screen.queryByText("OIDC is not configured")).toBeNull();
@@ -106,7 +119,7 @@ describe("SecurityPage", () => {
       ),
     );
     renderPage();
-    const user = userEvent.setup();
+    const user = await openSection("TOTP");
     await user.type(
       await screen.findByLabelText("输入当前密码以启用"),
       "correct-horse-42",
@@ -147,7 +160,7 @@ describe("SecurityPage", () => {
     );
     await user.click(screen.getByRole("button", { name: "更新用户名" }));
     expect(await screen.findByText("用户名已更新")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "登录与安全" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "设置" })).toBeVisible();
   });
 
   it("updates the password after current-password proof and stays on the page", async () => {
@@ -180,6 +193,66 @@ describe("SecurityPage", () => {
     );
     await user.click(screen.getByRole("button", { name: "更新密码" }));
     expect(await screen.findByText("密码已更新")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "登录与安全" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "设置" })).toBeVisible();
+  });
+
+  it("keeps password login on until an External Identity Binding is usable", async () => {
+    server.use(
+      http.get("/api/v1/auth/security", () =>
+        HttpResponse.json({
+          totp_login_required: false,
+          password_login_enabled: true,
+          password_login_available: true,
+          oidc: { available: true, bound: false },
+          oauth: { available: false, bound: false },
+        }),
+      ),
+    );
+    renderPage();
+    await openSection("登录配置");
+    expect(await screen.findByText("密码登录")).toBeVisible();
+    expect(screen.getByRole("switch", { name: "密码登录" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(
+      screen.getByText("需要先绑定可用的 OAuth 或 OpenID Connect"),
+    ).toBeVisible();
+  });
+
+  it("closes password login after current-password proof", async () => {
+    let enabled = true;
+    server.use(
+      http.get("/api/v1/auth/security", () =>
+        HttpResponse.json({
+          totp_login_required: false,
+          password_login_enabled: enabled,
+          password_login_available: enabled,
+          oidc: {
+            available: true,
+            bound: true,
+            issuer: "https://id.example",
+          },
+          oauth: { available: false, bound: false },
+        }),
+      ),
+      http.put("/api/v1/auth/password-login", async ({ request }) => {
+        const body = (await request.json()) as { enabled: boolean };
+        enabled = body.enabled;
+        return HttpResponse.json({
+          password_login_enabled: enabled,
+          password_login_available: enabled,
+        });
+      }),
+    );
+    renderPage();
+    const user = await openSection("登录配置");
+    await user.click(await screen.findByRole("switch", { name: "密码登录" }));
+    await user.type(
+      await screen.findByTestId("password-login-password"),
+      "correct-horse-42",
+    );
+    await user.click(screen.getByRole("button", { name: "关闭密码登录" }));
+    expect(await screen.findByText("已关闭密码登录")).toBeVisible();
   });
 });

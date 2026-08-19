@@ -21,8 +21,9 @@ const (
 
 // Organization is the one administrative boundary in a self-hosted Core.
 type Organization struct {
-	DisplayName       string
-	TOTPLoginRequired bool
+	DisplayName          string
+	TOTPLoginRequired    bool
+	PasswordLoginEnabled bool
 }
 
 type ExternalIdentityBinding struct {
@@ -46,7 +47,11 @@ func (s *Store) Organization(ctx context.Context) (*Organization, error) {
 	if err != nil {
 		return nil, mapNoRows(err)
 	}
-	return &Organization{DisplayName: row.DisplayName, TOTPLoginRequired: row.TotpLoginRequired}, nil
+	return &Organization{
+		DisplayName:          row.DisplayName,
+		TOTPLoginRequired:    row.TotpLoginRequired,
+		PasswordLoginEnabled: row.PasswordLoginEnabled,
+	}, nil
 }
 
 func (s *Store) HumanIdentityCount(ctx context.Context) (int, error) {
@@ -437,6 +442,32 @@ func (s *Store) DisableTOTP(ctx context.Context, memberID, currentSessionHash st
 	}
 	if err := q.DeleteOtherMemberSessions(ctx, gen.DeleteOtherMemberSessionsParams{AdminID: memberID, IDHash: currentSessionHash}); err != nil {
 		return err
+	}
+	if err := appendAuditTx(ctx, q, audit); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) SetPasswordLoginEnabled(ctx context.Context, memberID, currentSessionHash string, enabled bool, audit AuditEvent) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := s.q.WithTx(tx)
+	if err := q.SetPasswordLoginEnabled(ctx, enabled); err != nil {
+		return err
+	}
+	if !enabled {
+		if err := q.DeleteMemberStepUpGrants(ctx, memberID); err != nil {
+			return err
+		}
+		if err := q.DeleteOtherMemberSessions(ctx, gen.DeleteOtherMemberSessionsParams{
+			AdminID: memberID, IDHash: currentSessionHash,
+		}); err != nil {
+			return err
+		}
 	}
 	if err := appendAuditTx(ctx, q, audit); err != nil {
 		return err

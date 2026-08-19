@@ -47,11 +47,13 @@ func NewHandler(svc *Service, publicURL string, trustedProxies []*net.IPNet) *Ha
 func (h *Handler) ConfigureOIDC(client *OIDCClient, unavailable string) {
 	h.oidc = client
 	h.oidcUnavailable = unavailable
+	h.svc.SetOIDCReady(client != nil)
 }
 
 func (h *Handler) ConfigureOAuth(client *OAuthClient, unavailable string) {
 	h.oauth = client
 	h.oauthUnavailable = unavailable
+	h.svc.SetOAuthReady(client != nil)
 }
 
 // Register mounts the identity routes: the public bootstrap/login/MFA flow
@@ -71,6 +73,7 @@ func (h *Handler) Register(mux *http.ServeMux, base string, requireSession func(
 	mux.HandleFunc("GET "+base+"/auth/oauth/login", h.StartOAuthLogin)
 	mux.HandleFunc("GET "+base+"/auth/oauth/callback", h.OAuthCallback)
 	mux.Handle("GET "+base+"/auth/security", requireSession(http.HandlerFunc(h.SecurityStatus)))
+	mux.Handle("PUT "+base+"/auth/password-login", requireSession(http.HandlerFunc(h.PasswordLogin)))
 	mux.Handle("POST "+base+"/auth/oidc/binding", requireSession(http.HandlerFunc(h.StartOIDCBinding)))
 	mux.Handle("DELETE "+base+"/auth/oidc/binding", requireSession(http.HandlerFunc(h.UnbindOIDC)))
 	mux.Handle("POST "+base+"/auth/oauth/binding", requireSession(http.HandlerFunc(h.StartOAuthBinding)))
@@ -135,11 +138,17 @@ func (h *Handler) OIDCStatus(w http.ResponseWriter, r *http.Request) {
 	_, oauthBound := h.oauthBinding(r.Context())
 	oidc := publicProviderStatus(h.oidcAvailable(), oidcBound)
 	oauth := publicProviderStatus(h.oauthAvailable(), oauthBound)
+	_, passwordAvailable, err := h.svc.PasswordLoginState(r.Context())
+	if err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, middleware.CodeInternal, "internal error")
+		return
+	}
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{
 		"available": oidc["available"], "bound": oidc["bound"],
-		"login_available": oidc["login_available"],
-		"oidc":            oidc,
-		"oauth":           oauth,
+		"login_available":          oidc["login_available"],
+		"password_login_available": passwordAvailable,
+		"oidc":                     oidc,
+		"oauth":                    oauth,
 	})
 }
 
@@ -156,10 +165,51 @@ func (h *Handler) SecurityStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	binding, bound := h.binding(r.Context())
 	oauthBinding, oauthBound := h.oauthBinding(r.Context())
+	_, passwordAvailable, err := h.svc.PasswordLoginState(r.Context())
+	if err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, middleware.CodeInternal, "internal error")
+		return
+	}
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{
-		"totp_login_required": organization.TOTPLoginRequired,
-		"oidc":                securityProviderStatus(h.oidcAvailable(), bound, h.oidcUnavailable, binding),
-		"oauth":               securityProviderStatus(h.oauthAvailable(), oauthBound, h.oauthUnavailable, oauthBinding),
+		"totp_login_required":      organization.TOTPLoginRequired,
+		"password_login_enabled":   organization.PasswordLoginEnabled,
+		"password_login_available": passwordAvailable,
+		"oidc":                     securityProviderStatus(h.oidcAvailable(), bound, h.oidcUnavailable, binding),
+		"oauth":                    securityProviderStatus(h.oauthAvailable(), oauthBound, h.oauthUnavailable, oauthBinding),
+	})
+}
+
+func (h *Handler) PasswordLogin(w http.ResponseWriter, r *http.Request) {
+	session := middleware.SessionFrom(r)
+	var body struct {
+		Enabled  bool   `json:"enabled"`
+		Password string `json:"password"`
+		TOTPCode string `json:"totp_code"`
+	}
+	if session == nil || json.NewDecoder(r.Body).Decode(&body) != nil {
+		middleware.WriteError(w, http.StatusBadRequest, middleware.CodeBadRequest, "invalid password login request")
+		return
+	}
+	err := h.svc.SetPasswordLoginEnabled(h.withContext(r), session.AdminID, session.SessionIDHash, body.Password, body.TOTPCode, body.Enabled)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrExternalLoginRequired):
+			middleware.WriteError(w, http.StatusConflict, middleware.CodeConflict, "password login cannot be disabled without an available external login")
+		case errors.Is(err, ErrInvalidCredentials):
+			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
+		default:
+			middleware.WriteError(w, http.StatusInternalServerError, middleware.CodeInternal, "internal error")
+		}
+		return
+	}
+	enabled, available, err := h.svc.PasswordLoginState(r.Context())
+	if err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, middleware.CodeInternal, "internal error")
+		return
+	}
+	middleware.WriteJSON(w, http.StatusOK, map[string]any{
+		"password_login_enabled":   enabled,
+		"password_login_available": available,
 	})
 }
 
@@ -268,9 +318,12 @@ func (h *Handler) UnbindOIDC(w http.ResponseWriter, r *http.Request) {
 	}
 	err := h.svc.UnbindOIDC(h.withContext(r), session.AdminID, session.SessionIDHash, body.Password, body.TOTPCode)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		switch {
+		case errors.Is(err, ErrLastExternalLogin):
+			middleware.WriteError(w, http.StatusConflict, middleware.CodeConflict, "re-enable password login before removing the last external identity binding")
+		case errors.Is(err, database.ErrNotFound):
 			middleware.WriteError(w, http.StatusNotFound, middleware.CodeNotFound, "external identity binding not found")
-		} else {
+		default:
 			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
 		}
 		return
@@ -383,9 +436,12 @@ func (h *Handler) UnbindOAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	err := h.svc.UnbindOAuth(h.withContext(r), session.AdminID, session.SessionIDHash, body.Password, body.TOTPCode)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
+		switch {
+		case errors.Is(err, ErrLastExternalLogin):
+			middleware.WriteError(w, http.StatusConflict, middleware.CodeConflict, "re-enable password login before removing the last external identity binding")
+		case errors.Is(err, database.ErrNotFound):
 			middleware.WriteError(w, http.StatusNotFound, middleware.CodeNotFound, "external identity binding not found")
-		} else {
+		default:
 			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
 		}
 		return
@@ -623,6 +679,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	out, err := h.svc.Login(ctx, body.Username, body.Password, h.sourceHash(r))
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrPasswordLoginDisabled):
+			middleware.WriteError(w, http.StatusForbidden, middleware.CodePasswordLoginDisabled, "password login disabled")
 		case errors.Is(err, ErrInvalidCredentials):
 			h.loginFailures.failed(limitKey, h.svc.now())
 			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
@@ -670,9 +728,12 @@ func (h *Handler) LoginSecondFactor(w http.ResponseWriter, r *http.Request) {
 	session, err := h.svc.CompleteLogin(ctx, challenge.Value, h.sourceHash(r), body.TOTPCode, body.RecoveryCode)
 	if err != nil {
 		h.factorFailures.failed(limitKey, h.svc.now())
-		if errors.Is(err, ErrChallengeExpired) {
+		switch {
+		case errors.Is(err, ErrPasswordLoginDisabled):
+			middleware.WriteError(w, http.StatusForbidden, middleware.CodePasswordLoginDisabled, "password login disabled")
+		case errors.Is(err, ErrChallengeExpired):
 			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeChallengeExpired, "login challenge expired")
-		} else {
+		default:
 			middleware.WriteError(w, http.StatusUnauthorized, middleware.CodeUnauthorized, "invalid credentials")
 		}
 		return

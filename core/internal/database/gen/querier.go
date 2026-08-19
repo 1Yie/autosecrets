@@ -15,6 +15,7 @@ type Querier interface {
 	AbandonCleanupConfirmation(ctx context.Context, assignmentID string) (int64, error)
 	AcquireBootstrapLock(ctx context.Context) error
 	ActivateMember(ctx context.Context, arg ActivateMemberParams) error
+	ActivatePendingNode(ctx context.Context, arg ActivatePendingNodeParams) (int64, error)
 	ActiveAdminCount(ctx context.Context, arg ActiveAdminCountParams) (int64, error)
 	AdminCount(ctx context.Context) (int64, error)
 	AdvanceDesiredRevision(ctx context.Context, arg AdvanceDesiredRevisionParams) error
@@ -44,6 +45,7 @@ type Querier interface {
 	CreateBoundedSession(ctx context.Context, arg CreateBoundedSessionParams) error
 	CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) error
 	CreateEnvironment(ctx context.Context, arg CreateEnvironmentParams) error
+	CreateNodeEnrollmentToken(ctx context.Context, arg CreateNodeEnrollmentTokenParams) error
 	CreateNodeGroup(ctx context.Context, arg CreateNodeGroupParams) error
 	DeactivateMemberRow(ctx context.Context, arg DeactivateMemberRowParams) error
 	DeleteActivationPolicyUnits(ctx context.Context, environmentID string) error
@@ -54,6 +56,7 @@ type Querier interface {
 	DeleteMFAEnrollmentsForMember(ctx context.Context, adminID string) error
 	DeleteMemberSessions(ctx context.Context, adminID string) error
 	DeleteMemberStepUpGrants(ctx context.Context, adminID string) error
+	DeleteNode(ctx context.Context, id string) (int64, error)
 	DeleteNodeGroupByID(ctx context.Context, id string) (int64, error)
 	DeleteOAuthIdentityBinding(ctx context.Context, adminID string) error
 	DeleteOtherMemberSessions(ctx context.Context, arg DeleteOtherMemberSessionsParams) error
@@ -69,6 +72,7 @@ type Querier interface {
 	GetActivationPolicy(ctx context.Context, environmentID string) (GetActivationPolicyRow, error)
 	GetApplication(ctx context.Context, id string) (Application, error)
 	GetEnvironment(ctx context.Context, arg GetEnvironmentParams) (GetEnvironmentRow, error)
+	GetNode(ctx context.Context, id string) (GetNodeRow, error)
 	HasAnyConfirmedMFA(ctx context.Context, adminID string) (bool, error)
 	HasConfirmedMFA(ctx context.Context, adminID string) (bool, error)
 	HasValidStepUpGrant(ctx context.Context, arg HasValidStepUpGrantParams) (bool, error)
@@ -140,6 +144,7 @@ type Querier interface {
 	RecordConvergence(ctx context.Context, arg RecordConvergenceParams) error
 	RegisterNode(ctx context.Context, arg RegisterNodeParams) error
 	RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) error
+	RenameNode(ctx context.Context, arg RenameNodeParams) (int64, error)
 	ReportCleanupTask(ctx context.Context, arg ReportCleanupTaskParams) (int64, error)
 	ResumeMFAEnrollment(ctx context.Context, arg ResumeMFAEnrollmentParams) (int64, error)
 	RevisionAppEnv(ctx context.Context, id string) (RevisionAppEnvRow, error)
@@ -170,8 +175,10 @@ type Querier interface {
 	SelectRevisionDraftVersion(ctx context.Context, arg SelectRevisionDraftVersionParams) (int64, error)
 	SelectSecretAppEnv(ctx context.Context, id string) (SelectSecretAppEnvRow, error)
 	SessionByID(ctx context.Context, arg SessionByIDParams) (SessionByIDRow, error)
+	SetNodeBundleDir(ctx context.Context, arg SetNodeBundleDirParams) (int64, error)
 	SetNodeDesired(ctx context.Context, arg SetNodeDesiredParams) error
 	SetNodePollInterval(ctx context.Context, arg SetNodePollIntervalParams) (int64, error)
+	SetPasswordLoginEnabled(ctx context.Context, passwordLoginEnabled bool) error
 	TOTPEnrollmentForMember(ctx context.Context, adminID string) (TOTPEnrollmentForMemberRow, error)
 	TouchNode(ctx context.Context, arg TouchNodeParams) error
 	TouchSessionActivity(ctx context.Context, arg TouchSessionActivityParams) error

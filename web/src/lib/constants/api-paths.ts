@@ -11,6 +11,7 @@ export const API_PATHS = {
 	authSecurity: "/api/v1/auth/security",
 	authUsername: "/api/v1/auth/username",
 	authPassword: "/api/v1/auth/password",
+	authPasswordLogin: "/api/v1/auth/password-login",
 	totpEnrollment: "/api/v1/auth/totp/enrollment",
 	totp: "/api/v1/auth/totp",
 	oidcBinding: "/api/v1/auth/oidc/binding",
@@ -50,4 +51,6 @@ export const API_PATHS = {
 	nodes: "/api/v1/nodes",
 	node: (nodeId: string) => `/api/v1/nodes/${nodeId}`,
 	installCommand: "/api/v1/nodes/install-command",
+	nodeInstallCommand: (nodeId: string) =>
+		`/api/v1/nodes/${nodeId}/install-command`,
 } as const;

@@ -25,7 +25,7 @@ export function BootstrapPage() {
 			<h1 className="text-xl font-bold">初始化 AutoSecrets</h1>
 			<p className="text-sm text-muted-foreground">
 				从 Core 日志粘贴一次性初始化码，创建 Administrator。本地登录默认使用
-				用户名与密码，之后可在登录与安全中启用 TOTP。
+				用户名与密码，之后可在设置中启用 TOTP。
 			</p>
 			<form
 				onSubmit={form.handleSubmit((values) =>

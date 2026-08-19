@@ -223,6 +223,7 @@ export function LoginPage() {
 		oidc.data?.oidc?.available ?? oidc.data?.available ?? false;
 	const oidcLoginAvailable =
 		oidc.data?.oidc?.login_available ?? oidc.data?.login_available ?? false;
+	const passwordLoginAvailable = oidc.data?.password_login_available ?? true;
 	const showExternalLogin = oidc.isSuccess && (oauthAvailable || oidcAvailable);
 
 	return (
@@ -237,54 +238,63 @@ export function LoginPage() {
 					{challengeMessage}
 				</p>
 			)}
-			<form
-				onSubmit={loginForm.handleSubmit(onLogin)}
-				className="flex flex-col gap-3"
-			>
-				<Field
-					className="w-full"
-					invalid={Boolean(loginForm.formState.errors.username)}
+			{!passwordLoginAvailable && (
+				<p className="text-sm text-muted-foreground">
+					已关闭密码登录，请使用 OAuth 或 OpenID Connect。
+				</p>
+			)}
+			{passwordLoginAvailable && (
+				<form
+					onSubmit={loginForm.handleSubmit(onLogin)}
+					className="flex flex-col gap-3"
 				>
-					<FieldLabel>用户名</FieldLabel>
-					<Input
+					<Field
 						className="w-full"
-						data-testid="username"
-						{...loginForm.register("username")}
-					/>
-					{loginForm.formState.errors.username && (
-						<FieldError>{loginForm.formState.errors.username.message}</FieldError>
-					)}
-				</Field>
-				<Field
-					className="w-full"
-					invalid={Boolean(loginForm.formState.errors.password)}
-				>
-					<FieldLabel>密码</FieldLabel>
-					<Input
+						invalid={Boolean(loginForm.formState.errors.username)}
+					>
+						<FieldLabel>用户名</FieldLabel>
+						<Input
+							className="w-full"
+							data-testid="username"
+							{...loginForm.register("username")}
+						/>
+						{loginForm.formState.errors.username && (
+							<FieldError>{loginForm.formState.errors.username.message}</FieldError>
+						)}
+					</Field>
+					<Field
 						className="w-full"
-						type="password"
-						data-testid="password"
-						{...loginForm.register("password")}
-					/>
-					{loginForm.formState.errors.password && (
-						<FieldError>{loginForm.formState.errors.password.message}</FieldError>
+						invalid={Boolean(loginForm.formState.errors.password)}
+					>
+						<FieldLabel>密码</FieldLabel>
+						<Input
+							className="w-full"
+							type="password"
+							data-testid="password"
+							{...loginForm.register("password")}
+						/>
+						{loginForm.formState.errors.password && (
+							<FieldError>{loginForm.formState.errors.password.message}</FieldError>
+						)}
+					</Field>
+					{login.isError && (
+						<p role="alert" className="text-sm text-destructive">
+							{String((login.error as Error).message)}
+						</p>
 					)}
-				</Field>
-				{login.isError && (
-					<p role="alert" className="text-sm text-destructive">
-						{String((login.error as Error).message)}
-					</p>
-				)}
-				<Button className="w-full" loading={login.isPending} type="submit">
-					登录
-				</Button>
-			</form>
+					<Button className="w-full" loading={login.isPending} type="submit">
+						登录
+					</Button>
+				</form>
+			)}
 			{showExternalLogin && (
 				<>
-					<div className="flex items-center gap-3 text-xs text-muted-foreground">
-						<span className="h-px flex-1 bg-border" />或
-						<span className="h-px flex-1 bg-border" />
-					</div>
+					{passwordLoginAvailable && (
+						<div className="flex items-center gap-3 text-xs text-muted-foreground">
+							<span className="h-px flex-1 bg-border" />或
+							<span className="h-px flex-1 bg-border" />
+						</div>
+					)}
 					{oauthAvailable && (
 						<ExternalLoginOption
 							title="OAuth"

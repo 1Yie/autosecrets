@@ -1,6 +1,11 @@
 # Overlay for scripts/dev-up.sh --lan.
 # Publishes the Agent mTLS proxy so other machines can enroll.
+# The proxy presents a self-signed cert; generated install commands
+# must skip TLS verification.
 services:
+  core:
+    environment:
+      CORE_INSTALL_CURL_OPTS: ${CORE_INSTALL_CURL_OPTS:-1}
   agent-proxy:
     ports:
       - "0.0.0.0:18443:18443"

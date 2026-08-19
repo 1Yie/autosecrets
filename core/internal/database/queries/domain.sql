@@ -223,12 +223,17 @@ WHERE application_id = $1 AND environment_id = $2 AND status = 'active';
 
 -- name: ListNode :many
 SELECT id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result,
-       poll_interval_seconds
+       poll_interval_seconds, bundle_dir
 FROM nodes ORDER BY name;
+
+-- name: GetNode :one
+SELECT id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result,
+       poll_interval_seconds, bundle_dir
+FROM nodes WHERE id = $1;
 
 -- name: NodeBySerial :one
 SELECT id, name, serial, age_pubkey, created_at, last_seen_at, desired_etag, observed_revision, last_result,
-       poll_interval_seconds
+       poll_interval_seconds, bundle_dir
 FROM nodes WHERE serial = $1;
 
 -- name: TouchNode :exec
@@ -241,11 +246,25 @@ UPDATE nodes SET desired_etag = $2 WHERE id = $1;
 -- name: SetNodePollInterval :execrows
 UPDATE nodes SET poll_interval_seconds = $2 WHERE id = $1;
 
+-- name: RenameNode :execrows
+UPDATE nodes SET name = $2 WHERE id = $1;
+
+-- name: SetNodeBundleDir :execrows
+UPDATE nodes SET bundle_dir = $2 WHERE id = $1;
+
+-- name: DeleteNode :execrows
+DELETE FROM nodes WHERE id = $1;
+
 -- name: CreateEnrollmentToken :exec
 INSERT INTO enrollment_tokens (token_hash, name, expires_at) VALUES ($1, $2, $3);
 
+-- name: CreateNodeEnrollmentToken :exec
+INSERT INTO enrollment_tokens (token_hash, name, expires_at, node_id)
+VALUES ($1, $2, $3, $4);
+
 -- name: SelectEnrollmentTokenForUpdate :one
-SELECT token_hash, name, created_at, expires_at FROM enrollment_tokens
+SELECT token_hash, name, created_at, expires_at, node_id
+FROM enrollment_tokens
 WHERE token_hash = $1 FOR UPDATE;
 
 -- name: SelectEnrollmentTokenUsedAt :one
@@ -255,8 +274,12 @@ SELECT used_at FROM enrollment_tokens WHERE token_hash = $1;
 UPDATE enrollment_tokens SET used_at = $2 WHERE token_hash = $1;
 
 -- name: RegisterNode :exec
-INSERT INTO nodes (id, name, serial, age_pubkey, cert_pem, cert_expires_at)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO nodes (id, name, serial, age_pubkey, cert_pem, cert_expires_at, bundle_dir)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: ActivatePendingNode :execrows
+UPDATE nodes SET serial = $2, age_pubkey = $3, cert_pem = $4, cert_expires_at = $5
+WHERE id = $1;
 
 -- name: AssignedRevisions :many
 SELECT DISTINCT a.revision_id

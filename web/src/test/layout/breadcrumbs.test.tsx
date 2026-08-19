@@ -46,11 +46,11 @@ describe("DashboardLayout breadcrumbs", () => {
 		expect(await screen.findByText("payments")).toBeInTheDocument();
 	});
 
-	it("shows the renamed login-and-security section label", async () => {
-		renderLayoutAt("/dashboard/login-and-security");
+	it("shows the settings section label", async () => {
+		renderLayoutAt("/dashboard/settings");
 		await screen.findByTestId("current-user");
 		const nav = await screen.findByLabelText("面包屑");
-		expect(nav).toHaveTextContent("登录与安全");
+		expect(nav).toHaveTextContent("设置");
 	});
 
 	it("renders nothing on an unknown dashboard path", async () => {

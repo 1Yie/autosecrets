@@ -164,6 +164,10 @@ _Avoid_: OTOP, OTP, dynamic code
 The Organization-wide rule that determines whether local authentication requires TOTP in addition to the Administrator's password; it is disabled by default for new Organizations.
 _Avoid_: MFA preference, remember device, optional code
 
+**Password Login Policy**:
+The Organization-wide rule that determines whether username-and-password can start a new Session. It may be disabled only while at least one External Identity Binding is usable for login; if no External Identity Provider can log the Administrator in, password login remains available.
+_Avoid_: disable local auth, SSO-only mode, passwordless
+
 **External Identity Provider**:
 An OpenID Connect provider or OAuth 2.0 authorization server that authenticates the Administrator outside AutoSecrets.
 _Avoid_: social login, SSO server

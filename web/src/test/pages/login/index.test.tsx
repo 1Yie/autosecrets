@@ -144,6 +144,32 @@ describe("LoginPage", () => {
     ).toBeVisible();
   });
 
+  it("hides the password form when password login is unavailable", async () => {
+    server.use(
+      http.get("/api/v1/auth/oidc/status", () =>
+        HttpResponse.json({
+          available: true,
+          bound: true,
+          login_available: true,
+          password_login_available: false,
+          oidc: { available: true, bound: true, login_available: true },
+          oauth: { available: false, bound: false, login_available: false },
+        }),
+      ),
+    );
+    renderPage();
+    expect(
+      await screen.findByText(
+        "已关闭密码登录，请使用 OAuth 或 OpenID Connect。",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByTestId("username")).toBeNull();
+    expect(screen.queryByTestId("password")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "使用 OpenID Connect 登录" }),
+    ).toBeVisible();
+  });
+
   it("returns to password entry and focuses username when the challenge expires", async () => {
     server.use(
       http.post("/api/v1/auth/login", () =>

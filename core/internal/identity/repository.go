@@ -38,6 +38,7 @@ type Repository interface {
 	ConsumeLoginChallenge(ctx context.Context, tokenHash, sourceHash string, now time.Time) (string, error)
 	UpsertStepUpGrant(ctx context.Context, sessionIDHash string, grantedAt, expiresAt time.Time) error
 	DisableTOTP(ctx context.Context, memberID, currentSessionHash string, audit database.AuditEvent) error
+	SetPasswordLoginEnabled(ctx context.Context, memberID, currentSessionHash string, enabled bool, audit database.AuditEvent) error
 	ExternalIdentityBinding(ctx context.Context) (*database.ExternalIdentityBinding, error)
 	OAuthIdentityBinding(ctx context.Context) (*database.ExternalIdentityBinding, error)
 	CreateOIDCTransaction(ctx context.Context, stateHash, purpose, memberID, nonce, verifier, returnTo string, expiresAt time.Time) error

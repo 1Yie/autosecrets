@@ -12,11 +12,15 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 describe("useInstallCommand", () => {
   it("returns the one-time install command", async () => {
-    const { result } = renderHook(() => useInstallCommand(), { wrapper });
-    result.current.mutate({ name: "web-1" });
+    const { result } = renderHook(() => useInstallCommand("node-1"), {
+      wrapper,
+    });
+    result.current.mutate({});
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.command).toContain("install.sh");
-    expect(result.current.data?.command).toContain("--token one-time-token-abc");
+    expect(result.current.data?.command).toContain(
+      "--token one-time-token-abc",
+    );
     expect(result.current.data?.command).toContain('--name "web-1"');
   });
 });

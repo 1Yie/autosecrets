@@ -7,6 +7,8 @@ export function resolveApiBase(envBase: string | undefined): string {
 
 export const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE);
 
+export const APP_VERSION = (import.meta.env.VITE_APP_VERSION ?? "0.0.0").trim();
+
 export function apiURL(path: string): string {
 	if (/^https?:\/\//.test(path)) {
 		return path;

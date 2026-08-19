@@ -9,6 +9,7 @@ export interface ExternalProviderPublicStatus {
 }
 
 export interface OIDCPublicStatus extends ExternalProviderPublicStatus {
+  password_login_available?: boolean;
   oidc?: ExternalProviderPublicStatus;
   oauth?: ExternalProviderPublicStatus;
 }

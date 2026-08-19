@@ -116,6 +116,14 @@ export const bindingSchema = z.object({
 
 export const nodeNameSchema = nameSchema;
 
+export const bundleDirSchema = z
+  .string()
+  .trim()
+  .refine(
+    (path) => path === "" || path.startsWith("/") || path.startsWith("~/"),
+    "部署路径必须是绝对路径或以 ~/ 开头",
+  );
+
 export type BootstrapForm = z.infer<typeof bootstrapSchema>;
 export type LoginForm = z.infer<typeof loginSchema>;
 export type SecondFactorForm = z.infer<typeof secondFactorSchema>;

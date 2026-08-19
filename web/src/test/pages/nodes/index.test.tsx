@@ -7,6 +7,33 @@ import { NodesPage } from "../../../pages/nodes";
 import { ToastProvider } from "../../../components/ui/toast";
 import { server } from "../../server";
 
+const pendingNode = {
+	id: "node-1",
+	name: "web-1",
+	serial: "",
+	created_at: "2026-08-12T12:00:00Z",
+	last_seen_at: null,
+	desired_etag: "",
+	observed_revision: "",
+	last_result: "",
+	state: "never_online",
+	unassigned: true,
+	poll_interval_seconds: 15,
+	bundle_dir: "~/.autosecrets",
+	enrolled: false,
+};
+
+const enrolledNode = {
+	...pendingNode,
+	serial: "serial-1",
+	last_seen_at: "2026-08-12T12:00:00Z",
+	observed_revision: "rev-1",
+	last_result: "ok",
+	state: "healthy",
+	unassigned: false,
+	enrolled: true,
+};
+
 function renderPage() {
 	const qc = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
@@ -20,28 +47,60 @@ function renderPage() {
 	);
 }
 
-async function openInstallDialog(user: ReturnType<typeof userEvent.setup>) {
-	await user.click(screen.getByRole("button", { name: "添加服务器" }));
-	await screen.findByTestId("node-name");
+function stubNodes(items: Array<typeof pendingNode | typeof enrolledNode>) {
+	server.use(
+		http.get("/api/v1/nodes", () =>
+			HttpResponse.json({ items, next_cursor: "", total: items.length }),
+		),
+	);
 }
 
-describe("NodesPage install command", () => {
-	it("renders the one-time install command with the token, once", async () => {
+describe("NodesPage add server", () => {
+	it("registers a server without showing an install command", async () => {
+		let items: Array<typeof pendingNode> = [];
+		let created: unknown;
+		server.use(
+			http.get("/api/v1/nodes", () =>
+				HttpResponse.json({ items, next_cursor: "", total: items.length }),
+			),
+			http.post("/api/v1/nodes", async ({ request }) => {
+				created = await request.json();
+				items = [pendingNode];
+				return HttpResponse.json(pendingNode, { status: 201 });
+			}),
+		);
 		renderPage();
 		const user = userEvent.setup();
-		await openInstallDialog(user);
-		await user.type(screen.getByTestId("node-name"), "web-1");
-		await user.click(screen.getByRole("button", { name: "生成" }));
+		await user.click(screen.getByRole("button", { name: "添加服务器" }));
+		await user.type(await screen.findByTestId("node-name"), "web-1");
+		await user.click(screen.getByRole("button", { name: "添加" }));
+		expect(await screen.findByText("服务器已添加")).toBeVisible();
+		expect(created).toEqual({
+			name: "web-1",
+			bundle_dir: "~/.autosecrets",
+		});
+		expect(screen.queryByTestId("install-command")).not.toBeInTheDocument();
+		expect(await screen.findByText("web-1")).toBeInTheDocument();
+	});
+});
+
+describe("NodesPage install command", () => {
+	it("renders the one-time install command from an existing server", async () => {
+		stubNodes([pendingNode]);
+		renderPage();
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole("button", { name: "生成连接" }));
 
 		const command = await screen.findByTestId("install-command");
 		expect(command.textContent).toContain("--token one-time-token-abc");
 		expect(command.textContent).toContain("--server https://agent.example.com");
 	});
 
-	it("accepts an explicit Materialized Bundle deployment path", async () => {
+	it("sends the stored bundle directory when generating a connection", async () => {
 		let requestBody: unknown;
+		stubNodes([{ ...pendingNode, bundle_dir: "/srv/autosecrets" }]);
 		server.use(
-			http.post("/api/v1/nodes/install-command", async ({ request }) => {
+			http.post("/api/v1/nodes/:nodeId/install-command", async ({ request }) => {
 				requestBody = await request.json();
 				return HttpResponse.json({
 					command: "curl install.sh --token one-time-token-abc",
@@ -51,25 +110,16 @@ describe("NodesPage install command", () => {
 		);
 		renderPage();
 		const user = userEvent.setup();
-		await openInstallDialog(user);
-		await user.clear(screen.getByTestId("node-name"));
-		await user.type(screen.getByTestId("node-name"), "web-1");
-		await user.clear(screen.getByTestId("node-bundle-dir"));
-		await user.type(screen.getByTestId("node-bundle-dir"), "/srv/autosecrets");
-		await user.click(screen.getByRole("button", { name: "生成" }));
+		await user.click(await screen.findByRole("button", { name: "生成连接" }));
 		await screen.findByTestId("install-command");
-		expect(requestBody).toEqual({
-			name: "web-1",
-			bundle_dir: "/srv/autosecrets",
-		});
+		expect(requestBody).toEqual({ bundle_dir: "/srv/autosecrets" });
 	});
 
 	it("shows the command once and never re-renders the token after dismissal", async () => {
+		stubNodes([pendingNode]);
 		renderPage();
 		const user = userEvent.setup();
-		await openInstallDialog(user);
-		await user.type(screen.getByTestId("node-name"), "web-1");
-		await user.click(screen.getByRole("button", { name: "生成" }));
+		await user.click(await screen.findByRole("button", { name: "生成连接" }));
 		const command = await screen.findByTestId("install-command");
 		expect(screen.getAllByTestId("install-command")).toHaveLength(1);
 		expect(command.textContent).toContain("one-time-token-abc");
@@ -77,16 +127,67 @@ describe("NodesPage install command", () => {
 
 	it("offers a copy affordance for the command", async () => {
 		const writeText = vi.fn().mockResolvedValue(undefined);
+		stubNodes([pendingNode]);
 		renderPage();
 		const user = userEvent.setup();
 		vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
-		await openInstallDialog(user);
-		await user.type(screen.getByTestId("node-name"), "web-1");
-		await user.click(screen.getByRole("button", { name: "生成" }));
+		await user.click(await screen.findByRole("button", { name: "生成连接" }));
 		await screen.findByTestId("install-command");
 		fireEvent.click(screen.getByRole("button", { name: "复制命令" }));
 		await waitFor(() => expect(writeText).toHaveBeenCalled());
 		expect(writeText.mock.calls[0][0]).toContain("one-time-token-abc");
+	});
+});
+
+describe("NodesPage edit and delete", () => {
+	it("renames a server", async () => {
+		let patchBody: unknown;
+		stubNodes([pendingNode]);
+		server.use(
+			http.patch("/api/v1/nodes/:nodeId", async ({ request }) => {
+				patchBody = await request.json();
+				return HttpResponse.json({
+					...pendingNode,
+					name: "ingstar",
+				});
+			}),
+		);
+		renderPage();
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole("button", { name: "修改" }));
+		const name = await screen.findByTestId("edit-node-name-node-1");
+		await user.clear(name);
+		await user.type(name, "ingstar");
+		await user.click(screen.getByRole("button", { name: "保存" }));
+		await waitFor(() =>
+			expect(patchBody).toEqual({
+				name: "ingstar",
+				bundle_dir: "~/.autosecrets",
+				poll_interval_seconds: 15,
+			}),
+		);
+		expect(await screen.findByText("服务器已更新")).toBeVisible();
+	});
+
+	it("deletes a server after confirmation", async () => {
+		let deleted = false;
+		let items = [pendingNode];
+		server.use(
+			http.get("/api/v1/nodes", () =>
+				HttpResponse.json({ items, next_cursor: "", total: items.length }),
+			),
+			http.delete("/api/v1/nodes/:nodeId", () => {
+				deleted = true;
+				items = [];
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+		renderPage();
+		const user = userEvent.setup();
+		await user.click(await screen.findByRole("button", { name: "删除" }));
+		await user.click(screen.getByRole("button", { name: "删除" }));
+		await waitFor(() => expect(deleted).toBe(true));
+		expect(await screen.findByText("服务器已删除")).toBeVisible();
 	});
 });
 
@@ -115,89 +216,50 @@ describe("NodesPage tab actions", () => {
 });
 
 describe("NodesPage poll interval", () => {
-	const node = {
-		id: "node-1",
-		name: "web-1",
-		serial: "serial-1",
-		created_at: "2026-08-12T12:00:00Z",
-		last_seen_at: "2026-08-12T12:00:00Z",
-		desired_etag: '"etag"',
-		observed_revision: "rev-1",
-		last_result: "ok",
-		state: "healthy",
-		unassigned: false,
-		poll_interval_seconds: 15,
-	};
+	const node = enrolledNode;
 
-	it("renders the current interval label and PATCHes a preset only on save", async () => {
+	it("shows the interval as read-only in the table", async () => {
+		stubNodes([node]);
+		renderPage();
+		expect(await screen.findByText("15秒")).toBeInTheDocument();
+		expect(
+			screen.queryByTestId("poll-interval-save-node-1"),
+		).not.toBeInTheDocument();
+	});
+
+	it("PATCHes a preset from the edit dialog", async () => {
 		let patchBody: unknown;
-		let currentInterval = 15;
 		server.use(
 			http.get("/api/v1/nodes", () =>
 				HttpResponse.json({
-					items: [{ ...node, poll_interval_seconds: currentInterval }],
+					items: [{ ...node, poll_interval_seconds: 15 }],
 					next_cursor: "",
 					total: 1,
 				}),
 			),
 			http.patch("/api/v1/nodes/:nodeId", async ({ request }) => {
 				patchBody = await request.json();
-				currentInterval = (patchBody as { poll_interval_seconds: number })
-					.poll_interval_seconds;
 				return HttpResponse.json({
-					id: "node-1",
-					poll_interval_seconds: currentInterval,
+					...node,
+					...(patchBody as object),
 				});
 			}),
 		);
 		renderPage();
 		const user = userEvent.setup();
-
-		expect(await screen.findByText("15秒")).toBeInTheDocument();
-		const save = screen.getByTestId("poll-interval-save-node-1");
-		expect(save).toBeDisabled();
-
-		await user.click(screen.getByTestId("poll-interval-node-1"));
+		await user.click(await screen.findByRole("button", { name: "修改" }));
+		await user.click(await screen.findByTestId("edit-poll-interval-node-1"));
 		await user.click(await screen.findByRole("option", { name: "1分钟" }));
 		expect(patchBody).toBeUndefined();
-		expect(save).toBeEnabled();
-
-		await user.click(save);
-		await waitFor(() => expect(patchBody).toEqual({ poll_interval_seconds: 60 }));
-		expect(await screen.findByText("轮询间隔已更新")).toBeVisible();
-	});
-
-	it("enables save again after the interval changes", async () => {
-		let currentInterval = 15;
-		server.use(
-			http.get("/api/v1/nodes", () =>
-				HttpResponse.json({
-					items: [{ ...node, poll_interval_seconds: currentInterval }],
-					next_cursor: "",
-					total: 1,
-				}),
-			),
-			http.patch("/api/v1/nodes/:nodeId", async ({ request }) => {
-				const body = (await request.json()) as { poll_interval_seconds: number };
-				currentInterval = body.poll_interval_seconds;
-				return HttpResponse.json({
-					id: "node-1",
-					poll_interval_seconds: currentInterval,
-				});
+		await user.click(screen.getByRole("button", { name: "保存" }));
+		await waitFor(() =>
+			expect(patchBody).toEqual({
+				name: node.name,
+				bundle_dir: node.bundle_dir,
+				poll_interval_seconds: 60,
 			}),
 		);
-		renderPage();
-		const user = userEvent.setup();
-		await screen.findByText("15秒");
-
-		await user.click(screen.getByTestId("poll-interval-node-1"));
-		await user.click(await screen.findByRole("option", { name: "30秒" }));
-		await user.click(screen.getByTestId("poll-interval-save-node-1"));
-		expect(await screen.findByText("轮询间隔已更新")).toBeVisible();
-
-		await user.click(screen.getByTestId("poll-interval-node-1"));
-		await user.click(await screen.findByRole("option", { name: "1分钟" }));
-		expect(screen.getByTestId("poll-interval-save-node-1")).toBeEnabled();
+		expect(await screen.findByText("服务器已更新")).toBeVisible();
 	});
 
 	it("offers the current interval when it is not a preset", async () => {
@@ -214,7 +276,8 @@ describe("NodesPage poll interval", () => {
 		const user = userEvent.setup();
 
 		expect(await screen.findByText("45秒")).toBeInTheDocument();
-		await user.click(screen.getByTestId("poll-interval-node-1"));
+		await user.click(await screen.findByRole("button", { name: "修改" }));
+		await user.click(await screen.findByTestId("edit-poll-interval-node-1"));
 		await screen.findByRole("option", { name: "45秒" });
 	});
 });

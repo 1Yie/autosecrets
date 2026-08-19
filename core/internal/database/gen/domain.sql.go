@@ -12,6 +12,33 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activatePendingNode = `-- name: ActivatePendingNode :execrows
+UPDATE nodes SET serial = $2, age_pubkey = $3, cert_pem = $4, cert_expires_at = $5
+WHERE id = $1
+`
+
+type ActivatePendingNodeParams struct {
+	ID            string    `json:"id"`
+	Serial        string    `json:"serial"`
+	AgePubkey     string    `json:"age_pubkey"`
+	CertPem       string    `json:"cert_pem"`
+	CertExpiresAt time.Time `json:"cert_expires_at"`
+}
+
+func (q *Queries) ActivatePendingNode(ctx context.Context, arg ActivatePendingNodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, activatePendingNode,
+		arg.ID,
+		arg.Serial,
+		arg.AgePubkey,
+		arg.CertPem,
+		arg.CertExpiresAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const advanceDesiredRevision = `-- name: AdvanceDesiredRevision :exec
 UPDATE assignments SET revision_id = $3
 WHERE application_id = $1 AND environment_id = $2 AND status = 'active'
@@ -195,6 +222,28 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 	return err
 }
 
+const createNodeEnrollmentToken = `-- name: CreateNodeEnrollmentToken :exec
+INSERT INTO enrollment_tokens (token_hash, name, expires_at, node_id)
+VALUES ($1, $2, $3, $4)
+`
+
+type CreateNodeEnrollmentTokenParams struct {
+	TokenHash string      `json:"token_hash"`
+	Name      string      `json:"name"`
+	ExpiresAt time.Time   `json:"expires_at"`
+	NodeID    pgtype.UUID `json:"node_id"`
+}
+
+func (q *Queries) CreateNodeEnrollmentToken(ctx context.Context, arg CreateNodeEnrollmentTokenParams) error {
+	_, err := q.db.Exec(ctx, createNodeEnrollmentToken,
+		arg.TokenHash,
+		arg.Name,
+		arg.ExpiresAt,
+		arg.NodeID,
+	)
+	return err
+}
+
 const createNodeGroup = `-- name: CreateNodeGroup :exec
 INSERT INTO node_groups (id, name) VALUES ($1, $2)
 `
@@ -232,6 +281,18 @@ type DeleteEnvironmentByIDParams struct {
 
 func (q *Queries) DeleteEnvironmentByID(ctx context.Context, arg DeleteEnvironmentByIDParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteEnvironmentByID, arg.ID, arg.ApplicationID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteNode = `-- name: DeleteNode :execrows
+DELETE FROM nodes WHERE id = $1
+`
+
+func (q *Queries) DeleteNode(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteNode, id)
 	if err != nil {
 		return 0, err
 	}
@@ -336,6 +397,43 @@ func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) 
 		&i.Name,
 		&i.ApplicationID,
 		&i.ProtectionLevel,
+	)
+	return i, err
+}
+
+const getNode = `-- name: GetNode :one
+SELECT id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result,
+       poll_interval_seconds, bundle_dir
+FROM nodes WHERE id = $1
+`
+
+type GetNodeRow struct {
+	ID                  string             `json:"id"`
+	Name                string             `json:"name"`
+	Serial              string             `json:"serial"`
+	CreatedAt           time.Time          `json:"created_at"`
+	LastSeenAt          pgtype.Timestamptz `json:"last_seen_at"`
+	DesiredEtag         string             `json:"desired_etag"`
+	ObservedRevision    string             `json:"observed_revision"`
+	LastResult          string             `json:"last_result"`
+	PollIntervalSeconds int32              `json:"poll_interval_seconds"`
+	BundleDir           string             `json:"bundle_dir"`
+}
+
+func (q *Queries) GetNode(ctx context.Context, id string) (GetNodeRow, error) {
+	row := q.db.QueryRow(ctx, getNode, id)
+	var i GetNodeRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Serial,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+		&i.DesiredEtag,
+		&i.ObservedRevision,
+		&i.LastResult,
+		&i.PollIntervalSeconds,
+		&i.BundleDir,
 	)
 	return i, err
 }
@@ -781,7 +879,7 @@ func (q *Queries) ListEnvironments(ctx context.Context, applicationID string) ([
 
 const listNode = `-- name: ListNode :many
 SELECT id, name, serial, created_at, last_seen_at, desired_etag, observed_revision, last_result,
-       poll_interval_seconds
+       poll_interval_seconds, bundle_dir
 FROM nodes ORDER BY name
 `
 
@@ -795,6 +893,7 @@ type ListNodeRow struct {
 	ObservedRevision    string             `json:"observed_revision"`
 	LastResult          string             `json:"last_result"`
 	PollIntervalSeconds int32              `json:"poll_interval_seconds"`
+	BundleDir           string             `json:"bundle_dir"`
 }
 
 func (q *Queries) ListNode(ctx context.Context) ([]ListNodeRow, error) {
@@ -816,6 +915,7 @@ func (q *Queries) ListNode(ctx context.Context) ([]ListNodeRow, error) {
 			&i.ObservedRevision,
 			&i.LastResult,
 			&i.PollIntervalSeconds,
+			&i.BundleDir,
 		); err != nil {
 			return nil, err
 		}
@@ -989,7 +1089,7 @@ func (q *Queries) MarkEnrollmentTokenUsed(ctx context.Context, arg MarkEnrollmen
 
 const nodeBySerial = `-- name: NodeBySerial :one
 SELECT id, name, serial, age_pubkey, created_at, last_seen_at, desired_etag, observed_revision, last_result,
-       poll_interval_seconds
+       poll_interval_seconds, bundle_dir
 FROM nodes WHERE serial = $1
 `
 
@@ -1004,6 +1104,7 @@ type NodeBySerialRow struct {
 	ObservedRevision    string             `json:"observed_revision"`
 	LastResult          string             `json:"last_result"`
 	PollIntervalSeconds int32              `json:"poll_interval_seconds"`
+	BundleDir           string             `json:"bundle_dir"`
 }
 
 func (q *Queries) NodeBySerial(ctx context.Context, serial string) (NodeBySerialRow, error) {
@@ -1020,13 +1121,14 @@ func (q *Queries) NodeBySerial(ctx context.Context, serial string) (NodeBySerial
 		&i.ObservedRevision,
 		&i.LastResult,
 		&i.PollIntervalSeconds,
+		&i.BundleDir,
 	)
 	return i, err
 }
 
 const registerNode = `-- name: RegisterNode :exec
-INSERT INTO nodes (id, name, serial, age_pubkey, cert_pem, cert_expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO nodes (id, name, serial, age_pubkey, cert_pem, cert_expires_at, bundle_dir)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type RegisterNodeParams struct {
@@ -1036,6 +1138,7 @@ type RegisterNodeParams struct {
 	AgePubkey     string    `json:"age_pubkey"`
 	CertPem       string    `json:"cert_pem"`
 	CertExpiresAt time.Time `json:"cert_expires_at"`
+	BundleDir     string    `json:"bundle_dir"`
 }
 
 func (q *Queries) RegisterNode(ctx context.Context, arg RegisterNodeParams) error {
@@ -1046,6 +1149,7 @@ func (q *Queries) RegisterNode(ctx context.Context, arg RegisterNodeParams) erro
 		arg.AgePubkey,
 		arg.CertPem,
 		arg.CertExpiresAt,
+		arg.BundleDir,
 	)
 	return err
 }
@@ -1062,6 +1166,23 @@ type RemoveGroupMemberParams struct {
 func (q *Queries) RemoveGroupMember(ctx context.Context, arg RemoveGroupMemberParams) error {
 	_, err := q.db.Exec(ctx, removeGroupMember, arg.GroupID, arg.NodeID)
 	return err
+}
+
+const renameNode = `-- name: RenameNode :execrows
+UPDATE nodes SET name = $2 WHERE id = $1
+`
+
+type RenameNodeParams struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) RenameNode(ctx context.Context, arg RenameNodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renameNode, arg.ID, arg.Name)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revisionAppEnv = `-- name: RevisionAppEnv :one
@@ -1260,15 +1381,17 @@ func (q *Queries) SelectDraftVersion(ctx context.Context, id string) (int64, err
 }
 
 const selectEnrollmentTokenForUpdate = `-- name: SelectEnrollmentTokenForUpdate :one
-SELECT token_hash, name, created_at, expires_at FROM enrollment_tokens
+SELECT token_hash, name, created_at, expires_at, node_id
+FROM enrollment_tokens
 WHERE token_hash = $1 FOR UPDATE
 `
 
 type SelectEnrollmentTokenForUpdateRow struct {
-	TokenHash string    `json:"token_hash"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	TokenHash string      `json:"token_hash"`
+	Name      string      `json:"name"`
+	CreatedAt time.Time   `json:"created_at"`
+	ExpiresAt time.Time   `json:"expires_at"`
+	NodeID    pgtype.UUID `json:"node_id"`
 }
 
 func (q *Queries) SelectEnrollmentTokenForUpdate(ctx context.Context, tokenHash string) (SelectEnrollmentTokenForUpdateRow, error) {
@@ -1279,6 +1402,7 @@ func (q *Queries) SelectEnrollmentTokenForUpdate(ctx context.Context, tokenHash 
 		&i.Name,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.NodeID,
 	)
 	return i, err
 }
@@ -1398,6 +1522,23 @@ func (q *Queries) SelectSecretAppEnv(ctx context.Context, id string) (SelectSecr
 	var i SelectSecretAppEnvRow
 	err := row.Scan(&i.ApplicationID, &i.EnvironmentID)
 	return i, err
+}
+
+const setNodeBundleDir = `-- name: SetNodeBundleDir :execrows
+UPDATE nodes SET bundle_dir = $2 WHERE id = $1
+`
+
+type SetNodeBundleDirParams struct {
+	ID        string `json:"id"`
+	BundleDir string `json:"bundle_dir"`
+}
+
+func (q *Queries) SetNodeBundleDir(ctx context.Context, arg SetNodeBundleDirParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setNodeBundleDir, arg.ID, arg.BundleDir)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setNodeDesired = `-- name: SetNodeDesired :exec

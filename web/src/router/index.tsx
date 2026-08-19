@@ -58,7 +58,11 @@ export const router = createBrowserRouter([
 			{ path: "apps/:appId", element: lazyPage(<AppPage />) },
 			{ path: "nodes", element: lazyPage(<NodesPage />) },
 			{ path: "audit", element: lazyPage(<AuditPage />) },
-			{ path: "login-and-security", element: lazyPage(<SecurityPage />) },
+			{ path: "settings", element: lazyPage(<SecurityPage />) },
+			{
+				path: "login-and-security",
+				element: <Navigate to="/dashboard/settings" replace />,
+			},
 			{ path: "*", element: <NotFoundPage /> },
 		],
 	},

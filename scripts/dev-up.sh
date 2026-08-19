@@ -39,11 +39,12 @@ echo "==> Stack (compose.dev.yaml)"
 "${COMPOSE[@]}" up -d --build
 
 echo "==> Waiting for http://127.0.0.1:18008"
+# Host HTTP_PROXY (Clash) would send 127.0.0.1 through the proxy.
 for _ in $(seq 1 60); do
-	wget -q -O /dev/null http://127.0.0.1:18008/api/v1/health 2>/dev/null && break
+	wget -q -O /dev/null --no-proxy http://127.0.0.1:18008/api/v1/health 2>/dev/null && break
 	sleep 1
 done
-wget -q -O /dev/null http://127.0.0.1:18008/api/v1/health 2>/dev/null || {
+wget -q -O /dev/null --no-proxy http://127.0.0.1:18008/api/v1/health 2>/dev/null || {
 	echo "stack failed to become ready" >&2
 	"${COMPOSE[@]}" logs --tail=40 core web >&2
 	exit 1
@@ -62,10 +63,8 @@ else
 fi
 if [ "$LAN" = "1" ]; then
 	echo
-	echo "  LAN mode: generate the Install Command in the Web UI (Nodes ->"
-	echo "  Add server), then on the target machine run it with TLS check"
-	echo "  skipped (self-signed dev certificate):"
-	echo "    AUTOSECRETS_CURL_OPTS='-k' <the generated curl command>"
+	echo "  LAN mode: add the server in Nodes, then Generate connection."
+	echo "  The command already includes curl -k (self-signed dev certificate)."
 	echo "  Agent endpoint: https://${LAN_IP}:18443/agent/v1/install.sh"
 fi
 echo "  Stop:       scripts/dev-down.sh"

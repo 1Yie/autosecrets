@@ -231,6 +231,7 @@ func (h *Handler) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			"desired_etag": node.DesiredETag, "observed_revision": node.ObservedRevision,
 			"last_result": node.LastResult, "state": state, "unassigned": unassigned,
 			"poll_interval_seconds": node.PollIntervalSeconds,
+			"bundle_dir":            node.BundleDir, "enrolled": node.Enrolled,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -276,20 +277,40 @@ func (h *Handler) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	middleware.WriteJSON(w, http.StatusOK, map[string]any{"items": page, "next_cursor": next, "total": len(out)})
 }
 
-// handleUpdateNode adjusts node-level settings such as the Agent polling
-// interval. Returns 404 for unknown nodes.
-func (h *Handler) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		PollIntervalSeconds *int `json:"poll_interval_seconds"`
+		Name      string `json:"name"`
+		BundleDir string `json:"bundle_dir"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.PollIntervalSeconds == nil ||
-		*body.PollIntervalSeconds < 5 || *body.PollIntervalSeconds > 86400 {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request",
-			"poll_interval_seconds must be between 5 and 86400")
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || !middleware.ValidName(body.Name, 64) {
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "名称不能为空（最多 64 个字符）")
 		return
 	}
-	seconds := *body.PollIntervalSeconds
-	if err := h.store.SetNodePollInterval(r.Context(), r.PathValue("nodeID"), seconds); err != nil {
+	if err := validateBundleDir(body.BundleDir); err != nil {
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	id := uuid.NewString()
+	name := strings.TrimSpace(body.Name)
+	if err := h.store.CreatePendingNode(r.Context(), id, name, strings.TrimSpace(body.BundleDir)); err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
+		return
+	}
+	node, err := h.store.GetNode(r.Context(), id)
+	if err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
+		return
+	}
+	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
+		Actor: middleware.ActorFrom(r), Action: "node.create", Resource: id,
+		Result: "ok", CorrelationID: middleware.CorrelationID(h.now, r),
+	})
+	middleware.WriteJSON(w, http.StatusCreated, nodeSettingsJSON(node))
+}
+
+func (h *Handler) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := r.PathValue("nodeID")
+	if err := h.store.DeleteNode(r.Context(), nodeID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			middleware.WriteError(w, http.StatusNotFound, "not_found", "node not found")
 			return
@@ -298,13 +319,90 @@ func (h *Handler) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
-		Actor: middleware.ActorFrom(r), Action: "node.update", Resource: r.PathValue("nodeID"),
-		Result:        fmt.Sprintf("poll_interval_seconds=%d", seconds),
-		CorrelationID: middleware.CorrelationID(h.now, r),
+		Actor: middleware.ActorFrom(r), Action: "node.delete", Resource: nodeID,
+		Result: "ok", CorrelationID: middleware.CorrelationID(h.now, r),
 	})
-	middleware.WriteJSON(w, http.StatusOK, map[string]any{
-		"id": r.PathValue("nodeID"), "poll_interval_seconds": seconds,
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUpdateNode adjusts node-level settings such as the name, bundle
+// directory, and Agent polling interval. Returns 404 for unknown nodes.
+func (h *Handler) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := r.PathValue("nodeID")
+	var body struct {
+		Name                *string `json:"name"`
+		BundleDir           *string `json:"bundle_dir"`
+		PollIntervalSeconds *int    `json:"poll_interval_seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
+		(body.Name == nil && body.BundleDir == nil && body.PollIntervalSeconds == nil) {
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "至少填写一项")
+		return
+	}
+	if body.PollIntervalSeconds != nil {
+		if *body.PollIntervalSeconds < 5 || *body.PollIntervalSeconds > 86400 {
+			middleware.WriteError(w, http.StatusBadRequest, "bad_request",
+				"poll_interval_seconds must be between 5 and 86400")
+			return
+		}
+		if err := h.store.SetNodePollInterval(r.Context(), nodeID, *body.PollIntervalSeconds); err != nil {
+			writeNodeStoreError(w, err)
+			return
+		}
+	}
+	if body.Name != nil {
+		if !middleware.ValidName(*body.Name, 64) {
+			middleware.WriteError(w, http.StatusBadRequest, "bad_request", "名称不能为空（最多 64 个字符）")
+			return
+		}
+		if err := h.store.RenameNode(r.Context(), nodeID, strings.TrimSpace(*body.Name)); err != nil {
+			writeNodeStoreError(w, err)
+			return
+		}
+	}
+	if body.BundleDir != nil {
+		if err := validateBundleDir(*body.BundleDir); err != nil {
+			middleware.WriteError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		if err := h.store.SetNodeBundleDir(r.Context(), nodeID, strings.TrimSpace(*body.BundleDir)); err != nil {
+			writeNodeStoreError(w, err)
+			return
+		}
+	}
+	node, err := h.store.GetNode(r.Context(), nodeID)
+	if err != nil {
+		writeNodeStoreError(w, err)
+		return
+	}
+	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
+		Actor: middleware.ActorFrom(r), Action: "node.update", Resource: nodeID,
+		Result: "ok", CorrelationID: middleware.CorrelationID(h.now, r),
 	})
+	middleware.WriteJSON(w, http.StatusOK, nodeSettingsJSON(node))
+}
+
+func nodeSettingsJSON(node *database.Node) map[string]any {
+	state := "never_online"
+	if node.Enrolled && node.LastSeenAt != nil {
+		state = "offline"
+	}
+	return map[string]any{
+		"id": node.ID, "name": node.Name, "serial": node.Serial,
+		"created_at": node.CreatedAt, "last_seen_at": node.LastSeenAt,
+		"desired_etag": node.DesiredETag, "observed_revision": node.ObservedRevision,
+		"last_result": node.LastResult, "state": state, "unassigned": true,
+		"poll_interval_seconds": node.PollIntervalSeconds,
+		"bundle_dir":            node.BundleDir, "enrolled": node.Enrolled,
+	}
+}
+
+func writeNodeStoreError(w http.ResponseWriter, err error) {
+	if errors.Is(err, database.ErrNotFound) {
+		middleware.WriteError(w, http.StatusNotFound, "not_found", "node not found")
+		return
+	}
+	middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 }
 
 // Register mounts the management and Agent routes owned by the fleet domain.
@@ -321,8 +419,11 @@ func (h *Handler) Register(mux *http.ServeMux, mgmtBase, agentBase string,
 	mux.Handle("POST "+mgmtBase+"/assignments/{assignmentID}/unassign", requireSession(http.HandlerFunc(h.handleUnassign)))
 	mux.Handle("POST "+mgmtBase+"/assignments/{assignmentID}/abandon-cleanup", requireSession(http.HandlerFunc(h.handleAbandonCleanup)))
 	mux.Handle("GET "+mgmtBase+"/nodes", requireSession(http.HandlerFunc(h.handleListNodes)))
+	mux.Handle("POST "+mgmtBase+"/nodes", requireSession(http.HandlerFunc(h.handleCreateNode)))
 	mux.Handle("PATCH "+mgmtBase+"/nodes/{nodeID}", requireSession(http.HandlerFunc(h.handleUpdateNode)))
+	mux.Handle("DELETE "+mgmtBase+"/nodes/{nodeID}", requireSession(http.HandlerFunc(h.handleDeleteNode)))
 	mux.Handle("POST "+mgmtBase+"/nodes/install-command", requireSession(http.HandlerFunc(h.handleInstallCommand)))
+	mux.Handle("POST "+mgmtBase+"/nodes/{nodeID}/install-command", requireSession(http.HandlerFunc(h.handleNodeInstallCommand)))
 
 	mux.HandleFunc("GET "+agentBase+"/install.sh", h.handleInstallScript)
 	mux.HandleFunc("GET "+agentBase+"/ca.pem", h.handleCAPEM)

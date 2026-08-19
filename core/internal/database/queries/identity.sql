@@ -1,5 +1,5 @@
 -- name: Organization :one
-SELECT display_name, totp_login_required FROM organization_config WHERE singleton;
+SELECT display_name, totp_login_required, password_login_enabled FROM organization_config WHERE singleton;
 
 -- name: HumanIdentityCount :one
 SELECT count(*) FROM admins;
@@ -71,6 +71,9 @@ UPDATE organization_config SET totp_login_required = true, updated_at = now() WH
 
 -- name: DisableTOTPLoginPolicy :exec
 UPDATE organization_config SET totp_login_required = false, updated_at = now() WHERE singleton;
+
+-- name: SetPasswordLoginEnabled :exec
+UPDATE organization_config SET password_login_enabled = $1, updated_at = now() WHERE singleton;
 
 -- name: PendingMFAEnrollment :one
 SELECT EXISTS(SELECT 1 FROM admins WHERE status = $1);

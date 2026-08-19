@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -83,10 +84,15 @@ func TestNodePollIntervalValidation(t *testing.T) {
 			t.Fatalf("interval %d must 400: %d %s", seconds, bad.status, bad.raw)
 		}
 	}
-	missing := ta.do(t, "PATCH", "/api/v1/nodes/"+nodeID,
+	rename := ta.do(t, "PATCH", "/api/v1/nodes/"+nodeID,
 		map[string]string{"name": "rename"}, a.cookie, a.csrf)
+	if rename.status != http.StatusOK || rename.body["name"] != "rename" {
+		t.Fatalf("rename: %d %s", rename.status, rename.raw)
+	}
+	missing := ta.do(t, "PATCH", "/api/v1/nodes/"+nodeID,
+		map[string]string{}, a.cookie, a.csrf)
 	if missing.status != http.StatusBadRequest {
-		t.Fatalf("missing interval must 400: %d %s", missing.status, missing.raw)
+		t.Fatalf("empty patch must 400: %d %s", missing.status, missing.raw)
 	}
 	unknown := ta.do(t, "PATCH", "/api/v1/nodes/00000000-0000-0000-0000-000000000000",
 		map[string]int{"poll_interval_seconds": 60}, a.cookie, a.csrf)
@@ -134,5 +140,60 @@ func TestDeleteNodeGroup(t *testing.T) {
 	rows := parsePage(t, list.raw)
 	if list.status != http.StatusOK || len(rows) != 0 {
 		t.Fatalf("node groups after delete: %d %s", list.status, list.raw)
+	}
+}
+
+func TestCreateRenameDeleteNode(t *testing.T) {
+	ta := newTestApp(t)
+	cookie, csrf := ta.bootstrap(t)
+	created := ta.do(t, "POST", "/api/v1/nodes", map[string]string{
+		"name": "starlight", "bundle_dir": "~/.autosecrets",
+	}, cookie, csrf)
+	if created.status != http.StatusCreated || created.body["name"] != "starlight" || created.body["enrolled"] != false {
+		t.Fatalf("create node: %d %s", created.status, created.raw)
+	}
+	nodeID := created.body["id"].(string)
+	if created.body["serial"] != "" {
+		t.Fatalf("pending serial must be hidden: %s", created.raw)
+	}
+
+	list := ta.do(t, "GET", "/api/v1/nodes", nil, cookie, "")
+	rows := parsePage(t, list.raw)
+	if len(rows) != 1 || rows[0]["enrolled"] != false || rows[0]["bundle_dir"] != "~/.autosecrets" {
+		t.Fatalf("pending list: %s", list.raw)
+	}
+
+	renamed := ta.do(t, "PATCH", "/api/v1/nodes/"+nodeID, map[string]string{"name": "ingstar"}, cookie, csrf)
+	if renamed.status != http.StatusOK || renamed.body["name"] != "ingstar" {
+		t.Fatalf("rename: %d %s", renamed.status, renamed.raw)
+	}
+
+	command := ta.do(t, "POST", "/api/v1/nodes/"+nodeID+"/install-command", map[string]string{}, cookie, csrf)
+	if command.status != http.StatusCreated || !strings.Contains(command.body["command"].(string), `--name "ingstar"`) {
+		t.Fatalf("install command: %d %s", command.status, command.raw)
+	}
+	token := tokenFromCommand(command.body["command"].(string))
+	id := ta.enrollNode(t, token, "ingstar")
+	if id.nodeID != nodeID {
+		t.Fatalf("enroll must keep reserved id: %s vs %s", id.nodeID, nodeID)
+	}
+
+	list = ta.do(t, "GET", "/api/v1/nodes", nil, cookie, "")
+	rows = parsePage(t, list.raw)
+	if len(rows) != 1 || rows[0]["enrolled"] != true || rows[0]["serial"] == "" {
+		t.Fatalf("enrolled list: %s", list.raw)
+	}
+
+	del := ta.do(t, "DELETE", "/api/v1/nodes/"+nodeID, nil, cookie, csrf)
+	if del.status != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", del.status, del.raw)
+	}
+	list = ta.do(t, "GET", "/api/v1/nodes", nil, cookie, "")
+	if len(parsePage(t, list.raw)) != 0 {
+		t.Fatalf("nodes after delete: %s", list.raw)
+	}
+	again := ta.do(t, "DELETE", "/api/v1/nodes/"+nodeID, nil, cookie, csrf)
+	if again.status != http.StatusNotFound {
+		t.Fatalf("delete missing: %d %s", again.status, again.raw)
 	}
 }

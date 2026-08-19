@@ -27,21 +27,26 @@ var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]{2,64}$`)
 // database.ErrConflict, database.ErrDuplicate) onto HTTP status codes and the
 // machine-readable error envelope.
 var (
-	ErrInvalidCredentials   = errors.New("identity: invalid credentials")
-	ErrSecondFactorRequired = errors.New("identity: second factor required")
-	ErrAlreadyEnrolled      = errors.New("identity: MFA already enrolled")
-	ErrEnrollmentNotPending = errors.New("identity: MFA enrollment is no longer pending")
-	ErrChallengeExpired     = errors.New("identity: login challenge expired")
+	ErrInvalidCredentials    = errors.New("identity: invalid credentials")
+	ErrSecondFactorRequired  = errors.New("identity: second factor required")
+	ErrAlreadyEnrolled       = errors.New("identity: MFA already enrolled")
+	ErrEnrollmentNotPending  = errors.New("identity: MFA enrollment is no longer pending")
+	ErrChallengeExpired      = errors.New("identity: login challenge expired")
+	ErrPasswordLoginDisabled = errors.New("identity: password login disabled")
+	ErrExternalLoginRequired = errors.New("identity: external login required")
+	ErrLastExternalLogin     = errors.New("identity: last external login")
 )
 
 // Service carries the identity business rules. It holds no HTTP concerns:
 // request parsing and status codes live in the handler, persistence in the
 // repository, and cross-domain Audit recording behind a narrow interface.
 type Service struct {
-	repo  Repository
-	audit AuditRecorder
-	seal  SecretCipher
-	now   func() time.Time
+	repo       Repository
+	audit      AuditRecorder
+	seal       SecretCipher
+	now        func() time.Time
+	oidcReady  bool
+	oauthReady bool
 }
 
 // SecretCipher is the narrow seal/open seam the identity domain needs to
@@ -53,6 +58,66 @@ type SecretCipher interface {
 
 func NewService(repo Repository, audit AuditRecorder, seal SecretCipher, now func() time.Time) *Service {
 	return &Service{repo: repo, audit: audit, seal: seal, now: now}
+}
+
+func (s *Service) SetOIDCReady(ready bool) { s.oidcReady = ready }
+
+func (s *Service) SetOAuthReady(ready bool) { s.oauthReady = ready }
+
+func (s *Service) PasswordLoginState(ctx context.Context) (enabled, available bool, err error) {
+	organization, err := s.repo.Organization(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	available, err = s.passwordLoginAvailable(ctx, organization)
+	return organization.PasswordLoginEnabled, available, err
+}
+
+func (s *Service) externalLoginAvailable(ctx context.Context) (bool, error) {
+	if s.oidcReady {
+		if _, err := s.repo.ExternalIdentityBinding(ctx); err == nil {
+			return true, nil
+		} else if !errors.Is(err, database.ErrNotFound) {
+			return false, err
+		}
+	}
+	if s.oauthReady {
+		if _, err := s.repo.OAuthIdentityBinding(ctx); err == nil {
+			return true, nil
+		} else if !errors.Is(err, database.ErrNotFound) {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+func (s *Service) passwordLoginAvailable(ctx context.Context, organization *database.Organization) (bool, error) {
+	if organization.PasswordLoginEnabled {
+		return true, nil
+	}
+	external, err := s.externalLoginAvailable(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !external, nil
+}
+
+func (s *Service) rejectLastExternalUnbind(ctx context.Context, remainingReady bool, remaining func(context.Context) (*database.ExternalIdentityBinding, error)) error {
+	organization, err := s.repo.Organization(ctx)
+	if err != nil {
+		return err
+	}
+	if organization.PasswordLoginEnabled {
+		return nil
+	}
+	if remainingReady {
+		if _, err := remaining(ctx); err == nil {
+			return nil
+		} else if !errors.Is(err, database.ErrNotFound) {
+			return err
+		}
+	}
+	return ErrLastExternalLogin
 }
 
 // --- correlation id via context (set by the handler layer) -----------------
@@ -187,6 +252,18 @@ func (s *Service) ConfirmMFAEnrollment(ctx context.Context, memberID, currentSes
 }
 
 func (s *Service) Login(ctx context.Context, username, password, sourceHash string) (*LoginOutput, error) {
+	organization, err := s.repo.Organization(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := s.passwordLoginAvailable(ctx, organization)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		s.auditEvent(ctx, "authentication", "auth.login", "", "password_login_disabled")
+		return nil, ErrPasswordLoginDisabled
+	}
 	member, err := s.repo.MemberByUsername(ctx, username)
 	if err != nil || member.Status != database.MemberActive {
 		s.auditEvent(ctx, "authentication", "auth.login", "", "denied")
@@ -196,10 +273,6 @@ func (s *Service) Login(ctx context.Context, username, password, sourceHash stri
 	if err != nil || !passwordOK {
 		s.auditEvent(ctx, "member:"+member.Username, "auth.login", member.ID, "denied")
 		return nil, ErrInvalidCredentials
-	}
-	organization, err := s.repo.Organization(ctx)
-	if err != nil {
-		return nil, err
 	}
 	if !organization.TOTPLoginRequired {
 		session, err := s.issueSession(ctx, member, "local")
@@ -219,6 +292,18 @@ func (s *Service) Login(ctx context.Context, username, password, sourceHash stri
 }
 
 func (s *Service) CompleteLogin(ctx context.Context, challengeToken, sourceHash, totpCode, recoveryCode string) (*Session, error) {
+	organization, err := s.repo.Organization(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := s.passwordLoginAvailable(ctx, organization)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		s.auditEvent(ctx, "authentication", "auth.second_factor", "", "password_login_disabled")
+		return nil, ErrPasswordLoginDisabled
+	}
 	memberID, err := s.repo.ConsumeLoginChallenge(ctx, crypto.HashToken(challengeToken), sourceHash, s.now())
 	if err != nil {
 		s.auditEvent(ctx, "authentication", "auth.second_factor", "", "denied")
@@ -444,6 +529,44 @@ func (s *Service) DisableTOTP(ctx context.Context, memberID, currentSessionHash,
 	})
 }
 
+func (s *Service) SetPasswordLoginEnabled(ctx context.Context, memberID, currentSessionHash, password, totpCode string, enabled bool) error {
+	action := "administrator.password_login_enabled"
+	if !enabled {
+		action = "administrator.password_login_disabled"
+	}
+	member, err := s.repo.MemberByID(ctx, memberID)
+	if err != nil {
+		s.auditEvent(ctx, "administrator:"+memberID, action, memberID, "denied")
+		return ErrInvalidCredentials
+	}
+	passwordOK, err := crypto.VerifyPassword(password, member.PasswordHash)
+	if err != nil || !passwordOK || !s.policyProofValid(ctx, member, totpCode, "", false) {
+		s.auditEvent(ctx, "administrator:"+member.Username, action, member.ID, "denied")
+		return ErrInvalidCredentials
+	}
+	organization, err := s.repo.Organization(ctx)
+	if err != nil {
+		return err
+	}
+	if organization.PasswordLoginEnabled == enabled {
+		return nil
+	}
+	if !enabled {
+		usable, err := s.externalLoginAvailable(ctx)
+		if err != nil {
+			return err
+		}
+		if !usable {
+			s.auditEvent(ctx, "administrator:"+member.Username, action, member.ID, "denied")
+			return ErrExternalLoginRequired
+		}
+	}
+	return s.repo.SetPasswordLoginEnabled(ctx, memberID, currentSessionHash, enabled, database.AuditEvent{
+		Actor: "administrator:" + member.Username, Action: action, Resource: member.ID,
+		Result: "ok", CorrelationID: CorrelationID(ctx),
+	})
+}
+
 func (s *Service) StartOIDCLogin(ctx context.Context, returnTo string) (*OIDCStart, error) {
 	binding, err := s.repo.ExternalIdentityBinding(ctx)
 	if err != nil || binding == nil {
@@ -626,6 +749,10 @@ func (s *Service) UnbindOAuth(ctx context.Context, memberID, currentSessionHash,
 		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oauth_unbound", member.ID, "denied")
 		return database.ErrNotFound
 	}
+	if err := s.rejectLastExternalUnbind(ctx, s.oidcReady, s.repo.ExternalIdentityBinding); err != nil {
+		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oauth_unbound", member.ID, "denied")
+		return err
+	}
 	return s.repo.UnbindOAuthIdentity(ctx, memberID, currentSessionHash, database.AuditEvent{
 		Actor: "administrator:" + member.Username, Action: "administrator.oauth_unbound", Resource: member.ID,
 		Result: "ok", CorrelationID: CorrelationID(ctx),
@@ -646,6 +773,10 @@ func (s *Service) UnbindOIDC(ctx context.Context, memberID, currentSessionHash, 
 	if _, err := s.repo.ExternalIdentityBinding(ctx); err != nil {
 		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oidc_unbound", member.ID, "denied")
 		return database.ErrNotFound
+	}
+	if err := s.rejectLastExternalUnbind(ctx, s.oauthReady, s.repo.OAuthIdentityBinding); err != nil {
+		s.auditEvent(ctx, "administrator:"+member.Username, "administrator.oidc_unbound", member.ID, "denied")
+		return err
 	}
 	return s.repo.UnbindExternalIdentity(ctx, memberID, currentSessionHash, database.AuditEvent{
 		Actor: "administrator:" + member.Username, Action: "administrator.oidc_unbound", Resource: member.ID,

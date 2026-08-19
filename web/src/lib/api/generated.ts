@@ -327,6 +327,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password-login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Enable or disable the Password Login Policy after local credential proof */
+        put: operations["setPasswordLogin"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/oidc/binding": {
         parameters: {
             query?: never;
@@ -771,7 +788,8 @@ export interface paths {
         /** List Managed Nodes and their convergence state (cursor paginated) */
         get: operations["listNodes"];
         put?: never;
-        post?: never;
+        /** Reserve a Managed Node before issuing an Install Command */
+        post: operations["createNode"];
         delete?: never;
         options?: never;
         head?: never;
@@ -788,10 +806,11 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete a Managed Node and its reserved enrollment tokens */
+        delete: operations["deleteNode"];
         options?: never;
         head?: never;
-        /** Adjust a Managed Node's settings, such as its polling interval */
+        /** Rename a Managed Node or adjust its polling interval and bundle path */
         patch: operations["updateNode"];
         trace?: never;
     };
@@ -823,6 +842,23 @@ export interface paths {
         put?: never;
         /** Issue a ten-minute single-use Enrollment Token and Install Command */
         post: operations["createInstallCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{nodeID}/install-command": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Issue a ten-minute single-use Enrollment Token for an existing node */
+        post: operations["createNodeInstallCommand"];
         delete?: never;
         options?: never;
         head?: never;
@@ -904,8 +940,13 @@ export interface components {
             login_available: boolean;
         };
         OIDCPublicStatus: components["schemas"]["ExternalProviderPublicStatus"] & {
+            password_login_available: boolean;
             oidc?: components["schemas"]["ExternalProviderPublicStatus"];
             oauth?: components["schemas"]["ExternalProviderPublicStatus"];
+        };
+        PasswordLoginPolicy: {
+            password_login_enabled: boolean;
+            password_login_available: boolean;
         };
         OIDCBindingProof: {
             password: string;
@@ -922,6 +963,8 @@ export interface components {
         };
         AuthenticationSecurity: {
             totp_login_required: boolean;
+            password_login_enabled: boolean;
+            password_login_available: boolean;
             oidc: components["schemas"]["ExternalProviderSecurity"];
             oauth: components["schemas"]["ExternalProviderSecurity"];
         };
@@ -1083,6 +1126,10 @@ export interface components {
             unassigned: boolean;
             /** @description How often the Agent polls for Desired State; Core delivers it in the desired/heartbeat responses and the Agent adopts it on its next pass. */
             poll_interval_seconds: number;
+            /** @description Materialized Bundle root stored for this node */
+            bundle_dir: string;
+            /** @description True after the Agent has consumed an Enrollment Token */
+            enrolled: boolean;
         };
         Overview: {
             /** Format: date-time */
@@ -1167,7 +1214,7 @@ export interface components {
              * @description Stable machine-readable code; switch on this
              * @enum {string}
              */
-            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "duplicate" | "internal" | "unavailable" | "payload_too_large" | "mfa_enrollment_required" | "second_factor_required" | "challenge_expired" | "rate_limited";
+            code: "bad_request" | "unauthorized" | "forbidden" | "not_found" | "conflict" | "duplicate" | "internal" | "unavailable" | "payload_too_large" | "mfa_enrollment_required" | "second_factor_required" | "challenge_expired" | "rate_limited" | "password_login_disabled";
         };
     };
     responses: {
@@ -1402,6 +1449,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -1810,6 +1858,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    setPasswordLogin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    password: string;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated Password Login Policy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordLoginPolicy"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+        };
+    };
     startOIDCBinding: {
         parameters: {
             query?: never;
@@ -1867,6 +1946,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     startOAuthBinding: {
@@ -1926,6 +2006,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     logout: {
@@ -2881,6 +2962,59 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
         };
     };
+    createNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description Optional Materialized Bundle root on the node. Must be an absolute path or start with ~/. */
+                    bundle_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Reserved node; generate a connection next */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Node"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    deleteNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Managed Node id (UUID) */
+                nodeID: components["parameters"]["NodeID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Node deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     updateNode: {
         parameters: {
             query?: never;
@@ -2894,8 +3028,10 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
+                    name?: string;
+                    bundle_dir?: string;
                     /** @description How often the Agent polls for Desired State (5s-24h); the Agent adopts it after its next heartbeat or desired poll. */
-                    poll_interval_seconds: number;
+                    poll_interval_seconds?: number;
                 };
             };
         };
@@ -2906,10 +3042,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        id: string;
-                        poll_interval_seconds: number;
-                    };
+                    "application/json": components["schemas"]["Node"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -2972,6 +3105,39 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createNodeInstallCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Managed Node id (UUID) */
+                nodeID: components["parameters"]["NodeID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Optional override of the node's stored bundle directory */
+                    bundle_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Install Command; the Token appears in this response only */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstallCommand"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

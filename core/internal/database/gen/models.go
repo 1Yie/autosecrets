@@ -110,6 +110,7 @@ type EnrollmentToken struct {
 	CreatedAt time.Time          `json:"created_at"`
 	ExpiresAt time.Time          `json:"expires_at"`
 	UsedAt    pgtype.Timestamptz `json:"used_at"`
+	NodeID    pgtype.UUID        `json:"node_id"`
 }
 
 type Environment struct {
@@ -189,6 +190,7 @@ type Node struct {
 	ObservedRevision    string             `json:"observed_revision"`
 	LastResult          string             `json:"last_result"`
 	PollIntervalSeconds int32              `json:"poll_interval_seconds"`
+	BundleDir           string             `json:"bundle_dir"`
 }
 
 type NodeConvergence struct {
@@ -233,10 +235,11 @@ type OidcTransaction struct {
 }
 
 type OrganizationConfig struct {
-	Singleton         bool      `json:"singleton"`
-	DisplayName       string    `json:"display_name"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	TotpLoginRequired bool      `json:"totp_login_required"`
+	Singleton            bool      `json:"singleton"`
+	DisplayName          string    `json:"display_name"`
+	UpdatedAt            time.Time `json:"updated_at"`
+	TotpLoginRequired    bool      `json:"totp_login_required"`
+	PasswordLoginEnabled bool      `json:"password_login_enabled"`
 }
 
 type RecoveryCode struct {
