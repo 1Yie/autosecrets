@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
+
+const oauthUserAgent = "autosecrets-core"
 
 // OAuthConfig is the deployment-provided Authorization Code + PKCE client.
 // Endpoints are explicit: there is no OpenID discovery and no ID Token.
@@ -84,6 +87,8 @@ func (c *OAuthClient) ExchangeAndIdentify(ctx context.Context, base, code, verif
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", oauthUserAgent)
 	if c.cfg.ClientSecret != "" {
 		req.SetBasicAuth(c.cfg.ClientID, c.cfg.ClientSecret)
 	}
@@ -95,13 +100,15 @@ func (c *OAuthClient) ExchangeAndIdentify(ctx context.Context, base, code, verif
 	if response.StatusCode != http.StatusOK {
 		return nil, errors.New("OAuth token exchange rejected")
 	}
-	var tokens struct {
-		AccessToken string `json:"access_token"`
-	}
-	if err := decodeBoundedJSON(response.Body, &tokens); err != nil || tokens.AccessToken == "" {
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
 		return nil, errors.New("OAuth token response did not contain an access token")
 	}
-	return c.userinfoIdentity(ctx, tokens.AccessToken)
+	accessToken, err := decodeOAuthAccessToken(body)
+	if err != nil {
+		return nil, err
+	}
+	return c.userinfoIdentity(ctx, accessToken)
 }
 
 func (c *OAuthClient) userinfoIdentity(ctx context.Context, accessToken string) (*OIDCIdentity, error) {
@@ -110,6 +117,8 @@ func (c *OAuthClient) userinfoIdentity(ctx context.Context, accessToken string) 
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", oauthUserAgent)
 	response, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("OAuth userinfo unavailable: %w", err)
@@ -137,6 +146,20 @@ func (c *OAuthClient) userinfoIdentity(ctx context.Context, accessToken string) 
 		display = oauthStringClaim(claims, "preferred_username")
 	}
 	return &OIDCIdentity{Issuer: c.Issuer(), Subject: subject, DisplayName: display}, nil
+}
+
+func decodeOAuthAccessToken(body []byte) (string, error) {
+	var tokens struct {
+		AccessToken string `json:"access_token"`
+	}
+	if json.Unmarshal(body, &tokens) == nil && tokens.AccessToken != "" {
+		return tokens.AccessToken, nil
+	}
+	values, err := url.ParseQuery(string(body))
+	if err != nil || values.Get("access_token") == "" {
+		return "", errors.New("OAuth token response did not contain an access token")
+	}
+	return values.Get("access_token"), nil
 }
 
 func oauthEndpointAllowed(endpoint *url.URL) bool {
