@@ -18,8 +18,10 @@ export interface ManagedNode {
 	enrolled: boolean;
 }
 
-export function useNodes() {
-	return useCursorPage<ManagedNode>(["nodes"], (cursor, page) =>
-		listPageQuery(API_PATHS.nodes, cursor, page),
+export function useNodes(limit?: number) {
+	return useCursorPage<ManagedNode>(
+		["nodes"],
+		(cursor, page) => listPageQuery(API_PATHS.nodes, cursor, page),
+		limit === undefined ? {} : { limit },
 	);
 }

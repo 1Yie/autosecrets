@@ -5,13 +5,15 @@ import { z } from "zod";
 import { apiGet } from "../../lib/api";
 import { API_PATHS } from "../../lib/constants/api-paths";
 import { useCreateAssignment } from "../../hooks/fleet/use-create-assignment";
+import { useUnassign } from "../../hooks/fleet/use-unassign";
 import { useApplications } from "../../hooks/applications/use-applications";
 import { useApplication } from "../../hooks/applications/use-application";
 import { useAssignments } from "../../hooks/fleet/use-assignments";
 import { useAddMember } from "../../hooks/fleet/use-add-member";
 import { useRemoveMember } from "../../hooks/fleet/use-remove-member";
+import { useNodes } from "../../hooks/fleet/use-nodes";
 import type { NodeGroup } from "../../hooks/fleet/use-node-groups";
-import type { ManagedNode } from "../../hooks/fleet/use-nodes";
+import { ConfirmDelete } from "../../components/confirm-delete";
 import { Button } from "../../components/ui/button";
 import { Field, FieldError, FieldLabel } from "../../components/ui/field";
 import {
@@ -44,10 +46,10 @@ import {
 	SheetTrigger,
 } from "../../components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTab } from "../../components/ui/tabs";
+import { toastSuccess } from "../../lib/toast";
 
 interface NodeGroupSheetProps {
 	group: NodeGroup;
-	nodes: ManagedNode[];
 }
 
 interface NodeOption {
@@ -60,13 +62,27 @@ const assignmentSchema = z.object({
 	environment_id: z.string().min(1, "请选择环境"),
 });
 
+function optionLabel(item: NodeOption) {
+	return item.label;
+}
+
+function optionValue(item: NodeOption) {
+	return item.value;
+}
+
+function optionsEqual(item: NodeOption, value: NodeOption) {
+	return item.value === value.value;
+}
+
 /** Node Group management Sheet: 成员 tab (searchable multi-select) and
  * 分配 tab (Secret Bundle binding for this group). */
-export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
+export function NodeGroupSheet({ group }: NodeGroupSheetProps) {
+	const nodes = useNodes(200);
 	const addMember = useAddMember(group.id);
 	const removeMember = useRemoveMember(group.id);
+	const unassign = useUnassign();
 	const memberIds = group.member_ids;
-	const options: NodeOption[] = nodes.map((node) => ({
+	const options: NodeOption[] = nodes.items.map((node) => ({
 		label: node.name,
 		value: node.id,
 	}));
@@ -99,7 +115,7 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 	});
 	const appId = watch("application_id");
 	const app = useApplication(appId);
-	const assignments = useAssignments();
+	const assignments = useAssignments(100);
 	const groupAssignments = assignments.items.filter(
 		(a) => a.group_id === group.id,
 	);
@@ -138,6 +154,9 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 			},
 		);
 	};
+	const memberError =
+		(addMember.error as Error | null)?.message ??
+		(removeMember.error as Error | null)?.message;
 
 	return (
 		<Sheet>
@@ -151,7 +170,7 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 				<SheetHeader>
 					<SheetTitle>{group.name}</SheetTitle>
 					<SheetDescription>
-						成员与分配的密钥绑定，变更立即生效。
+						管理组成员，以及这个组要下发的应用环境。
 					</SheetDescription>
 				</SheetHeader>
 				<SheetPanel>
@@ -161,13 +180,16 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 							<TabsTab value="assignments">分配</TabsTab>
 						</TabsList>
 
-						<TabsContent value="members" className="pt-2">
-							{nodes.length === 0 ? (
+						<TabsContent value="members" className="space-y-2 pt-2">
+							{nodes.items.length === 0 ? (
 								<p className="text-muted-foreground text-sm">
 									还没有注册节点，先到节点列表添加服务器。
 								</p>
 							) : (
 								<Combobox<NodeOption, true>
+									isItemEqualToValue={optionsEqual}
+									itemToStringLabel={optionLabel}
+									itemToStringValue={optionValue}
 									items={options}
 									multiple
 									onValueChange={onMembersChange}
@@ -178,18 +200,13 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 											{(selected: NodeOption[]) => (
 												<>
 													{selected?.map((item) => (
-														<ComboboxChip
-															aria-label={item.label}
-															key={item.value}
-														>
+														<ComboboxChip aria-label={item.label} key={item.value}>
 															{item.label}
 														</ComboboxChip>
 													))}
 													<ComboboxChipsInput
 														aria-label="添加节点"
-														placeholder={
-															selected.length > 0 ? undefined : "搜索节点添加…"
-														}
+														placeholder={selected.length > 0 ? undefined : "搜索节点添加…"}
 													/>
 												</>
 											)}
@@ -207,21 +224,18 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 									</ComboboxPopup>
 								</Combobox>
 							)}
+							{memberError && (
+								<p className="text-sm text-destructive">{memberError}</p>
+							)}
 						</TabsContent>
 
 						<TabsContent value="assignments" className="space-y-3 pt-2">
-							<form
-								className="flex flex-col gap-3"
-								onSubmit={handleSubmit(bind)}
-							>
+							<form className="flex flex-col gap-3" onSubmit={handleSubmit(bind)}>
 								<Controller
 									name="application_id"
 									control={control}
 									render={({ field }) => (
-										<Field
-											className="w-full"
-											invalid={Boolean(errors.application_id)}
-										>
+										<Field className="w-full" invalid={Boolean(errors.application_id)}>
 											<FieldLabel>应用</FieldLabel>
 											<Select
 												value={field.value}
@@ -236,8 +250,7 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 												>
 													<SelectValue placeholder="选择应用…">
 														{(value) =>
-															applicationNameById[String(value ?? "")] ??
-															"选择应用…"
+															applicationNameById[String(value ?? "")] ?? "选择应用…"
 														}
 													</SelectValue>
 												</SelectTrigger>
@@ -259,10 +272,7 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 									name="environment_id"
 									control={control}
 									render={({ field }) => (
-										<Field
-											className="w-full"
-											invalid={Boolean(errors.environment_id)}
-										>
+										<Field className="w-full" invalid={Boolean(errors.environment_id)}>
 											<FieldLabel>环境</FieldLabel>
 											<Select
 												value={field.value}
@@ -275,8 +285,7 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 												>
 													<SelectValue placeholder="选择环境…">
 														{(value) =>
-															environmentLabelById[String(value ?? "")] ??
-															"选择环境…"
+															environmentLabelById[String(value ?? "")] ?? "选择环境…"
 														}
 													</SelectValue>
 												</SelectTrigger>
@@ -295,7 +304,7 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 									)}
 								/>
 								{createAssignment.isError && (
-									<p className="text-sm text-red-500">
+									<p className="text-sm text-destructive">
 										{String((createAssignment.error as Error).message)}
 									</p>
 								)}
@@ -304,21 +313,29 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 									type="submit"
 									disabled={!isValid || createAssignment.isPending}
 								>
-									绑定应用
+									添加分配
 								</Button>
 							</form>
 
 							<div className="space-y-1.5">
-								<p className="text-muted-foreground text-sm">已绑定</p>
+								<p className="text-muted-foreground text-sm">当前分配</p>
+								{memberIds.length === 0 &&
+									groupAssignments.some(
+										(assignment) => assignment.status === "active",
+									) && (
+										<p className="text-sm text-destructive">
+											成员已经清空，但这个组还有应用分配。删组前请先解除，清成员不会自动拆掉分配。
+										</p>
+									)}
 								{groupAssignments.length === 0 ? (
 									<p className="text-muted-foreground/72 text-sm">
-										该组还没有绑定任何应用。
+										这个组还没有要下发的应用环境。
 									</p>
 								) : (
 									groupAssignments.map((assignment) => (
 										<div
 											key={assignment.id}
-											className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
+											className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
 										>
 											<span>
 												{applicationNameById[assignment.application_id] ??
@@ -327,9 +344,29 @@ export function NodeGroupSheet({ group, nodes }: NodeGroupSheetProps) {
 												{environmentLabelById[assignment.environment_id] ??
 													assignment.environment_id.slice(0, 8)}
 											</span>
-											<span className="text-muted-foreground/72">
-												{assignment.status === "active" ? "已绑定" : "卸载中"}
-											</span>
+											{assignment.status === "active" ? (
+												<ConfirmDelete
+													confirmLabel="解除"
+													description="节点会停止接收这个应用环境的密钥。清成员不会拆掉分配；解除后 Agent 完成清理，才能删除节点组。"
+													error={
+														unassign.isError && unassign.variables === assignment.id
+															? String((unassign.error as Error).message)
+															: undefined
+													}
+													label="解除"
+													pending={
+														unassign.isPending && unassign.variables === assignment.id
+													}
+													title="解除这个分配？"
+													onConfirm={() =>
+														unassign.mutate(assignment.id, {
+															onSuccess: () => toastSuccess("已开始解除分配"),
+														})
+													}
+												/>
+											) : (
+												<span className="text-muted-foreground/72">卸载中</span>
+											)}
 										</div>
 									))
 								)}

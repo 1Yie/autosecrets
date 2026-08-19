@@ -2,6 +2,10 @@ import { useState } from "react";
 import { useDocumentTitle } from "../../hooks/use-document-title";
 import { useNodes } from "../../hooks/fleet/use-nodes";
 import { useNodeGroups } from "../../hooks/fleet/use-node-groups";
+import {
+	type Assignment,
+	useAssignments,
+} from "../../hooks/fleet/use-assignments";
 import { useDeleteNodeGroup } from "../../hooks/fleet/use-delete-node-group";
 import { useDeleteNode } from "../../hooks/fleet/use-delete-node";
 import { CreateNodeForm } from "./create-node-form";
@@ -27,13 +31,14 @@ import { TablePagination } from "../../components/table-pagination";
 import { StatusBadge } from "../../components/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTab } from "../../components/ui/tabs";
 import { Badge } from "../../components/ui/badge";
-import { toastSuccess } from "../../lib/toast";
+import { toastError, toastSuccess } from "../../lib/toast";
+import type { NodeGroup } from "../../hooks/fleet/use-node-groups";
 
 export function NodesPage() {
 	const nodes = useNodes();
 	useDocumentTitle("节点");
 	const groups = useNodeGroups();
-	const removeGroup = useDeleteNodeGroup();
+	const assignments = useAssignments(100);
 	const [tab, setTab] = useState("nodes");
 
 	return (
@@ -84,6 +89,7 @@ export function NodesPage() {
 									<TableRow className="hover:bg-transparent">
 										<TableHead>节点组</TableHead>
 										<TableHead>节点数</TableHead>
+										<TableHead>分配</TableHead>
 										<TableHead className="text-right">操作</TableHead>
 									</TableRow>
 								</TableHeader>
@@ -94,21 +100,15 @@ export function NodesPage() {
 											<TableCell>
 												<Badge variant="outline">{group.member_ids.length}</Badge>
 											</TableCell>
+											<TableCell>
+												<Badge variant="outline">
+													{activeAssignmentCount(assignments.items, group.id)}
+												</Badge>
+											</TableCell>
 											<TableCell className="text-right">
 												<div className="flex items-center justify-end gap-2">
-													<NodeGroupSheet group={group} nodes={nodes.items} />
-													<ConfirmDelete
-														label="删除"
-														title={`删除节点组 ${group.name}？`}
-														description="会删除该节点组及其成员关系。若仍绑定应用环境，需要先解除分配。"
-														pending={removeGroup.isPending}
-														error={
-															removeGroup.isError
-																? String((removeGroup.error as Error).message)
-																: undefined
-														}
-														onConfirm={() => removeGroup.mutate(group.id)}
-													/>
+													<NodeGroupSheet group={group} />
+													<DeleteNodeGroupButton group={group} />
 												</div>
 											</TableCell>
 										</TableRow>
@@ -184,6 +184,51 @@ function NodeActions({ node }: { node: ManagedNode }) {
 				}
 			/>
 		</div>
+	);
+}
+
+function activeAssignmentCount(items: Assignment[], groupId: string) {
+	return items.filter(
+		(assignment) =>
+			assignment.group_id === groupId && assignment.status === "active",
+	).length;
+}
+
+function readableDeleteNodeGroupError(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	if (
+		message === "node group still has an active assignment" ||
+		message.includes("still has an active assignment")
+	) {
+		return "该节点组仍有应用分配，请先在「分配」里解除";
+	}
+	return message || "删除节点组失败";
+}
+
+function DeleteNodeGroupButton({ group }: { group: NodeGroup }) {
+	const removeGroup = useDeleteNodeGroup();
+	const [open, setOpen] = useState(false);
+	return (
+		<ConfirmDelete
+			description="会删除该节点组及其成员关系。如果还有应用分配，先打开「管理 → 分配」解除。"
+			label="删除"
+			open={open}
+			pending={removeGroup.isPending}
+			title={`删除节点组 ${group.name}？`}
+			onConfirm={() =>
+				removeGroup.mutate(group.id, {
+					onSuccess: () => {
+						setOpen(false);
+						toastSuccess("节点组已删除");
+					},
+					onError: (error) => {
+						setOpen(false);
+						toastError(readableDeleteNodeGroupError(error));
+					},
+				})
+			}
+			onOpenChange={setOpen}
+		/>
 	);
 }
 

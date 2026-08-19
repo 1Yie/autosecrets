@@ -12,6 +12,7 @@ import {
 
 interface ConfirmDeleteProps {
 	label?: string;
+	confirmLabel?: string;
 	title: string;
 	description: string;
 	pending?: boolean;
@@ -23,6 +24,7 @@ interface ConfirmDeleteProps {
 
 export function ConfirmDelete({
 	label,
+	confirmLabel,
 	title,
 	description,
 	pending,
@@ -31,17 +33,13 @@ export function ConfirmDelete({
 	open,
 	onOpenChange,
 }: ConfirmDeleteProps) {
-	const controlled = open !== undefined;
-
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			{!controlled && (
-				<AlertDialogTrigger
-					render={<Button variant="destructive-outline" size="sm" />}
-				>
-					{label}
-				</AlertDialogTrigger>
-			)}
+			<AlertDialogTrigger
+				render={<Button variant="destructive-outline" size="sm" />}
+			>
+				{label}
+			</AlertDialogTrigger>
 			<AlertDialogPopup>
 				<AlertDialogHeader>
 					<AlertDialogTitle>{title}</AlertDialogTitle>
@@ -53,7 +51,7 @@ export function ConfirmDelete({
 						取消
 					</AlertDialogClose>
 					<Button variant="destructive" loading={pending} onClick={onConfirm}>
-						删除
+						{confirmLabel ?? "删除"}
 					</Button>
 				</AlertDialogFooter>
 			</AlertDialogPopup>

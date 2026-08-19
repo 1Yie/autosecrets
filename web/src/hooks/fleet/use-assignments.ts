@@ -13,8 +13,10 @@ export interface Assignment {
 	created_at: string;
 }
 
-export function useAssignments() {
-	return useCursorPage<Assignment>(["assignments"], (cursor, page) =>
-		listPageQuery(API_PATHS.assignments, cursor, page),
+export function useAssignments(limit?: number) {
+	return useCursorPage<Assignment>(
+		["assignments"],
+		(cursor, page) => listPageQuery(API_PATHS.assignments, cursor, page),
+		limit === undefined ? {} : { limit },
 	);
 }

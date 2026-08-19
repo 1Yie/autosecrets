@@ -70,7 +70,7 @@ func (h *Handler) handleCreateNodeGroup(w http.ResponseWriter, r *http.Request) 
 	id := uuid.NewString()
 	if err := h.store.CreateNodeGroup(r.Context(), id, strings.TrimSpace(body.Name)); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
-			middleware.WriteError(w, http.StatusConflict, "duplicate", "node group name already exists")
+			middleware.WriteError(w, http.StatusConflict, "duplicate", "节点组名称已存在")
 			return
 		}
 		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
@@ -87,11 +87,11 @@ func (h *Handler) handleDeleteNodeGroup(w http.ResponseWriter, r *http.Request) 
 	groupID := r.PathValue("groupID")
 	if err := h.store.DeleteNodeGroup(r.Context(), groupID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			middleware.WriteError(w, http.StatusNotFound, "not_found", "node group not found")
+			middleware.WriteError(w, http.StatusNotFound, "not_found", "节点组不存在")
 			return
 		}
 		if errors.Is(err, database.ErrConflict) {
-			middleware.WriteError(w, http.StatusConflict, "conflict", "node group still has an active assignment")
+			middleware.WriteError(w, http.StatusConflict, "conflict", "该节点组仍有应用分配，请先在「分配」里解除")
 			return
 		}
 		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
@@ -109,17 +109,17 @@ func (h *Handler) handleAddGroupMember(w http.ResponseWriter, r *http.Request) {
 		NodeID string `json:"node_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NodeID == "" {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "node_id is required")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "需要选择节点")
 		return
 	}
 	if err := h.store.AddGroupMember(r.Context(), r.PathValue("groupID"), body.NodeID); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			middleware.WriteError(w, http.StatusNotFound, "not_found", "node group or node not found")
+			middleware.WriteError(w, http.StatusNotFound, "not_found", "节点组或节点不存在")
 			return
 		}
 		if errors.Is(err, database.ErrConflict) {
 			middleware.WriteError(w, http.StatusConflict, "conflict",
-				"membership would give a managed node multiple sources for the same application and environment")
+				"该节点已通过其他节点组绑定同一应用环境")
 			return
 		}
 		middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
@@ -159,7 +159,7 @@ func (h *Handler) handleCreateAssignment(w http.ResponseWriter, r *http.Request)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil ||
 		body.GroupID == "" || body.ApplicationID == "" || body.EnvironmentID == "" {
-		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "group_id, application_id, and environment_id are required")
+		middleware.WriteError(w, http.StatusBadRequest, "bad_request", "需要选择节点组、应用和环境")
 		return
 	}
 	reason, ok := middleware.OperationReasonOr(body.OperationReason)
@@ -171,14 +171,14 @@ func (h *Handler) handleCreateAssignment(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		switch {
 		case errors.Is(err, database.ErrNotFound):
-			middleware.WriteError(w, http.StatusNotFound, "not_found", "node group or environment not found")
+			middleware.WriteError(w, http.StatusNotFound, "not_found", "节点组或环境不存在")
 		case errors.Is(err, database.ErrBadPayload):
-			middleware.WriteError(w, http.StatusBadRequest, "bad_request", "environment has no published revision to assign")
+			middleware.WriteError(w, http.StatusBadRequest, "bad_request", "该环境还没有已发布的版本，无法分配")
 		case errors.Is(err, database.ErrConflict):
 			middleware.WriteError(w, http.StatusConflict, "conflict",
-				"assignment would give a managed node multiple sources for the same application and environment")
+				"该分配会让节点同时收到同一应用环境的多份密钥")
 		case errors.Is(err, database.ErrDuplicate):
-			middleware.WriteError(w, http.StatusConflict, "duplicate", "assignment already exists for this node group and bundle")
+			middleware.WriteError(w, http.StatusConflict, "duplicate", "该节点组已经绑定过这个应用环境")
 		default:
 			middleware.WriteError(w, http.StatusInternalServerError, "internal", "内部错误")
 		}

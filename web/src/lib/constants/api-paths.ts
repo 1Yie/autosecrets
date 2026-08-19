@@ -48,6 +48,8 @@ export const API_PATHS = {
 	groupMember: (groupId: string, nodeId: string) =>
 		`/api/v1/node-groups/${groupId}/nodes/${nodeId}`,
 	assignments: "/api/v1/assignments",
+	assignmentUnassign: (assignmentId: string) =>
+		`/api/v1/assignments/${assignmentId}/unassign`,
 	nodes: "/api/v1/nodes",
 	node: (nodeId: string) => `/api/v1/nodes/${nodeId}`,
 	installCommand: "/api/v1/nodes/install-command",

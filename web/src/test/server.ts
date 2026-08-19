@@ -139,6 +139,16 @@ export const handlers = [
 	http.get("/api/v1/assignments", () =>
 		HttpResponse.json({ items: [], next_cursor: "", total: 0 }),
 	),
+	http.post("/api/v1/assignments/:assignmentId/unassign", () =>
+		HttpResponse.json(
+			{
+				id: "asg-1",
+				status: "removing",
+				tasks: [],
+			},
+			{ status: 202 },
+		),
+	),
 	http.get("/api/v1/applications", () =>
 		HttpResponse.json({
 			items: [

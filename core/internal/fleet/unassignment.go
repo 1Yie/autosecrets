@@ -25,12 +25,12 @@ func (h *Handler) handleUnassign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.store.AssignmentByID(r.Context(), assignmentID); err != nil {
-		middleware.WriteError(w, http.StatusNotFound, "not_found", "assignment not found")
+		middleware.WriteError(w, http.StatusNotFound, "not_found", "分配不存在")
 		return
 	}
 	tasks, err := h.store.Unassign(r.Context(), assignmentID)
 	if err != nil {
-		middleware.WriteError(w, http.StatusConflict, "conflict", "assignment is not active")
+		middleware.WriteError(w, http.StatusConflict, "conflict", "该分配已在解除中")
 		return
 	}
 	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{
@@ -46,7 +46,7 @@ func (h *Handler) handleUnassignmentState(w http.ResponseWriter, r *http.Request
 	assignmentID := r.PathValue("assignmentID")
 	assignment, err := h.store.AssignmentByID(r.Context(), assignmentID)
 	if err != nil {
-		middleware.WriteError(w, http.StatusNotFound, "not_found", "assignment not found")
+		middleware.WriteError(w, http.StatusNotFound, "not_found", "分配不存在")
 		return
 	}
 	tasks, err := h.store.ListUnassignmentTasks(r.Context(), assignmentID)
@@ -76,11 +76,11 @@ func (h *Handler) handleAbandonCleanup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.store.AssignmentByID(r.Context(), assignmentID); err != nil {
-		middleware.WriteError(w, http.StatusNotFound, "not_found", "assignment not found")
+		middleware.WriteError(w, http.StatusNotFound, "not_found", "分配不存在")
 		return
 	}
 	if err := h.store.AbandonCleanupConfirmation(r.Context(), assignmentID); err != nil {
-		middleware.WriteError(w, http.StatusConflict, "conflict", "no pending cleanup remains")
+		middleware.WriteError(w, http.StatusConflict, "conflict", "没有待确认的清理任务")
 		return
 	}
 	_ = h.store.AppendAudit(r.Context(), nil, database.AuditEvent{

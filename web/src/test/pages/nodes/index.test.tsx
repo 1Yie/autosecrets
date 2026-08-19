@@ -215,6 +215,91 @@ describe("NodesPage tab actions", () => {
 	});
 });
 
+describe("NodesPage node group assignment", () => {
+	it("unassigns a bound application from the group sheet", async () => {
+		let unassigned = false;
+		let assignments = [
+			{
+				id: "asg-1",
+				group_id: "group-1",
+				group_name: "web",
+				application_id: "app-1",
+				environment_id: "env-1",
+				revision_id: "rev-1",
+				status: "active",
+				created_at: "2026-08-12T12:00:00Z",
+			},
+		];
+		server.use(
+			http.get("/api/v1/node-groups", () =>
+				HttpResponse.json({
+					items: [{ id: "group-1", name: "web", member_ids: ["node-1"] }],
+					next_cursor: "",
+					total: 1,
+				}),
+			),
+			http.get("/api/v1/assignments", () =>
+				HttpResponse.json({
+					items: assignments,
+					next_cursor: "",
+					total: assignments.length,
+				}),
+			),
+			http.post("/api/v1/assignments/:assignmentId/unassign", () => {
+				unassigned = true;
+				assignments = [{ ...assignments[0], status: "removing" }];
+				return HttpResponse.json(
+					{ id: "asg-1", status: "removing", tasks: [] },
+					{ status: 202 },
+				);
+			}),
+		);
+		renderPage();
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("tab", { name: "节点组" }));
+		await user.click(await screen.findByRole("button", { name: "管理 web" }));
+		await user.click(screen.getByRole("tab", { name: "分配" }));
+		expect(await screen.findByText("payments / production")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "解除" }));
+		await user.click(screen.getByRole("button", { name: "解除" }));
+		await waitFor(() => expect(unassigned).toBe(true));
+		expect(await screen.findByText("已开始解除分配")).toBeVisible();
+		expect(await screen.findByText("卸载中")).toBeInTheDocument();
+	});
+
+	it("toasts a readable error when the group still has an assignment", async () => {
+		server.use(
+			http.get("/api/v1/node-groups", () =>
+				HttpResponse.json({
+					items: [{ id: "group-1", name: "web", member_ids: [] }],
+					next_cursor: "",
+					total: 1,
+				}),
+			),
+			http.delete("/api/v1/node-groups/:groupId", () =>
+				HttpResponse.json(
+					{
+						error: "node group still has an active assignment",
+						code: "conflict",
+					},
+					{ status: 409 },
+				),
+			),
+		);
+		renderPage();
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("tab", { name: "节点组" }));
+		await user.click(await screen.findByRole("button", { name: "删除" }));
+		await user.click(screen.getByRole("button", { name: "删除" }));
+		expect(
+			await screen.findByText("该节点组仍有应用分配，请先在「分配」里解除"),
+		).toBeVisible();
+		expect(
+			screen.queryByText("node group still has an active assignment"),
+		).not.toBeInTheDocument();
+	});
+});
+
 describe("NodesPage poll interval", () => {
 	const node = enrolledNode;
 
