@@ -287,6 +287,12 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=$PREFIX/autosecrets-agent serve --config $CONFIG_DIR/config.toml
+Environment=HTTP_PROXY=
+Environment=HTTPS_PROXY=
+Environment=http_proxy=
+Environment=https_proxy=
+Environment=ALL_PROXY=
+Environment=NO_PROXY=*
 Restart=always
 RestartSec=5
 

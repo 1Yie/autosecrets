@@ -145,7 +145,7 @@ func (a *App) Handler() http.Handler {
 }
 
 func (a *App) agentAuth(next http.Handler) http.Handler {
-	return middleware.AgentIdentityMiddleware(a.cfg.TrustedProxy, a.cfg.CertHeader)(next)
+	return middleware.AgentIdentityMiddleware(a.cfg.TrustedProxy, a.cfg.CertHeader, a.ca, a.now)(next)
 }
 
 func (a *App) withRequestLog(next http.Handler) http.Handler {

@@ -5,6 +5,7 @@
 package crypto
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdsa"
@@ -468,6 +469,41 @@ func (c *CA) IssueAgentCert(nodeID string, csrPEM []byte, ttl time.Duration) (ce
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
 		serialBig.Text(16), now.Add(ttl), nil
+}
+
+// ParseAgentCert parses a PEM or DER Agent certificate and checks it was
+// issued by this CA and is currently valid.
+func (c *CA) ParseAgentCert(raw []byte, now time.Time) (*x509.Certificate, error) {
+	der := bytes.TrimSpace(raw)
+	if block, _ := pem.Decode(der); block != nil && block.Type == "CERTIFICATE" {
+		der = block.Bytes
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		return nil, err
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(c.cert)
+	if _, err := cert.Verify(x509.VerifyOptions{
+		Roots:       roots,
+		CurrentTime: now,
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}); err != nil {
+		return nil, err
+	}
+	return cert, nil
+}
+
+// VerifyAgentProof checks an Ed25519 signature from an Agent certificate.
+func VerifyAgentProof(cert *x509.Certificate, message, sig []byte) error {
+	pub, ok := cert.PublicKey.(ed25519.PublicKey)
+	if !ok {
+		return errors.New("crypto: agent cert is not Ed25519")
+	}
+	if !ed25519.Verify(pub, message, sig) {
+		return errors.New("crypto: invalid agent proof")
+	}
+	return nil
 }
 
 // subjectKeyID returns the RFC 5280 standard Subject Key Identifier: SHA-1 of

@@ -120,6 +120,10 @@ func TestCAIssuesAgentCert(t *testing.T) {
 	if cert.Subject.CommonName != "node:node-1" {
 		t.Fatalf("unexpected CN %q", cert.Subject.CommonName)
 	}
+	parsed, err := ca.ParseAgentCert(certPEM, time.Now())
+	if err != nil || parsed.SerialNumber.Text(16) != serial {
+		t.Fatalf("ParseAgentCert: %v serial=%s", err, serial)
+	}
 }
 
 func TestSignerSignVerify(t *testing.T) {

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import ssl
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -26,6 +28,8 @@ class AgentAPI:
         key_pem: str = "",
     ):
         self.base = server_url.rstrip("/")
+        self._cert_pem = cert_pem
+        self._key_pem = key_pem
         if ca_bundle and Path(ca_bundle).exists():
             ctx = ssl.create_default_context(cafile=ca_bundle)
         else:
@@ -51,6 +55,31 @@ class AgentAPI:
             if hasattr(self, attr):
                 Path(getattr(self, attr)).unlink(missing_ok=True)
 
+    def _proof_headers(self, method: str, path: str) -> dict[str, str]:
+        if not self._cert_pem or not self._key_pem:
+            return {}
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+
+        ts = str(int(time.time()))
+        message = f"{ts}\n{method}\n{path}".encode()
+        try:
+            loaded = serialization.load_pem_private_key(
+                self._key_pem.encode(), password=None
+            )
+        except (ValueError, TypeError) as e:
+            raise RuntimeError("agent key is not a valid PEM private key") from e
+        if not isinstance(loaded, Ed25519PrivateKey):
+            raise RuntimeError("agent key is not Ed25519")
+        sig = loaded.sign(message)
+        return {
+            "X-Autosecrets-Cert": base64.b64encode(self._cert_pem.encode()).decode(),
+            "X-Autosecrets-Ts": ts,
+            "X-Autosecrets-Sig": base64.b64encode(sig).decode(),
+        }
+
     def _request(
         self,
         method: str,
@@ -59,14 +88,19 @@ class AgentAPI:
         headers: dict[str, str] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         data = None
+        merged = {**self._proof_headers(method, path), **(headers or {})}
         if body is not None:
             data = json.dumps(body).encode()
-            headers = {**(headers or {}), "Content-Type": "application/json"}
+            merged["Content-Type"] = "application/json"
         req = urllib.request.Request(
-            self.base + path, data=data, method=method, headers=headers or {}
+            self.base + path, data=data, method=method, headers=merged
+        )
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            urllib.request.HTTPSHandler(context=self.ctx),
         )
         try:
-            with urllib.request.urlopen(req, context=self.ctx, timeout=30) as resp:
+            with opener.open(req, timeout=30) as resp:
                 raw = resp.read()
                 return resp.status, (json.loads(raw) if raw else {})
         except urllib.error.HTTPError as e:

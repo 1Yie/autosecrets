@@ -8,10 +8,13 @@ package middleware
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,13 +147,33 @@ func AgentSerialFromContext(ctx context.Context) (string, bool) {
 	return serial, ok && serial != ""
 }
 
-// AgentIdentityMiddleware enforces the Agent trust boundary. A request is only
-// admitted when it arrives from a configured trusted proxy CIDR AND carries the
-// forwarded certificate header. Every other request gets 403: an Agent API
-// route must never be reachable without a proven node identity.
-func AgentIdentityMiddleware(trusted []*net.IPNet, certHeader string) func(http.Handler) http.Handler {
+const (
+	AgentProofCertHeader = "X-Autosecrets-Cert"
+	AgentProofTsHeader   = "X-Autosecrets-Ts"
+	AgentProofSigHeader  = "X-Autosecrets-Sig"
+	agentProofMaxSkew    = 5 * time.Minute
+)
+
+// AgentIdentityVerifier checks a certificate presented by the Agent itself
+// (public HTTPS) rather than a serial forwarded by an mTLS proxy.
+type AgentIdentityVerifier interface {
+	ParseAgentCert(raw []byte, now time.Time) (*x509.Certificate, error)
+}
+
+// AgentIdentityMiddleware enforces the Agent trust boundary. A request is
+// admitted when it carries a CA-issued certificate proof, or when it arrives
+// from a trusted proxy CIDR with the forwarded certificate serial.
+func AgentIdentityMiddleware(trusted []*net.IPNet, certHeader string, verifier AgentIdentityVerifier, now func() time.Time) func(http.Handler) http.Handler {
+	if now == nil {
+		now = time.Now
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if serial, ok := agentProofSerial(r, verifier, now()); ok {
+				ctx := context.WithValue(r.Context(), agentSerialKey{}, serial)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			remoteIP, err := remoteIP(r.RemoteAddr)
 			if err != nil || !isTrusted(remoteIP, trusted) {
 				WriteJSON(w, http.StatusForbidden, map[string]string{"error": "untrusted proxy"})
@@ -165,6 +188,46 @@ func AgentIdentityMiddleware(trusted []*net.IPNet, certHeader string) func(http.
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func agentProofSerial(r *http.Request, verifier AgentIdentityVerifier, now time.Time) (string, bool) {
+	if verifier == nil {
+		return "", false
+	}
+	certB64 := strings.TrimSpace(r.Header.Get(AgentProofCertHeader))
+	tsHeader := strings.TrimSpace(r.Header.Get(AgentProofTsHeader))
+	sigB64 := strings.TrimSpace(r.Header.Get(AgentProofSigHeader))
+	if certB64 == "" || tsHeader == "" || sigB64 == "" {
+		return "", false
+	}
+	ts, err := strconv.ParseInt(tsHeader, 10, 64)
+	if err != nil {
+		return "", false
+	}
+	delta := now.Sub(time.Unix(ts, 0))
+	if delta < 0 {
+		delta = -delta
+	}
+	if delta > agentProofMaxSkew {
+		return "", false
+	}
+	raw, err := base64.StdEncoding.DecodeString(certB64)
+	if err != nil {
+		return "", false
+	}
+	cert, err := verifier.ParseAgentCert(raw, now)
+	if err != nil {
+		return "", false
+	}
+	sig, err := base64.StdEncoding.DecodeString(sigB64)
+	if err != nil {
+		return "", false
+	}
+	message := []byte(tsHeader + "\n" + r.Method + "\n" + r.URL.RequestURI())
+	if err := crypto.VerifyAgentProof(cert, message, sig); err != nil {
+		return "", false
+	}
+	return cert.SerialNumber.Text(16), true
 }
 
 func remoteIP(remoteAddr string) (net.IP, error) {
