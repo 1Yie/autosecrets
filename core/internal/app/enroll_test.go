@@ -145,6 +145,9 @@ func TestInstallScriptAndArtifacts(t *testing.T) {
 	if !strings.Contains(string(script.raw), string(pubPEM)) {
 		t.Fatal("install script does not embed the signing public key")
 	}
+	if !strings.Contains(string(script.raw), "autosecrets-agent-$ART_OS-$ART_ARCH.tar.gz") {
+		t.Fatal("install script must pick the host OS artifact")
+	}
 
 	// Signed artifact round trip.
 	artifact := []byte("#!/bin/sh\necho fake-agent\n")

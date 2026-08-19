@@ -53,17 +53,41 @@ services:
       CORE_OAUTH_CLIENT_ID: ${CORE_OAUTH_CLIENT_ID:-}
       CORE_OAUTH_CLIENT_SECRET: ${CORE_OAUTH_CLIENT_SECRET:-}
       CORE_OAUTH_SCOPES: ${CORE_OAUTH_SCOPES:-profile}
-      CORE_ARTIFACT_DIR: ${CORE_ARTIFACT_DIR:-/artifacts}
+      CORE_ARTIFACT_DIR: /artifacts
     volumes:
       - keys:/keys
-      - ${CORE_ARTIFACT_DIR:-./artifacts}:/artifacts:ro
+      - ${AUTOSECRETS_ARTIFACT_DIR:-artifacts}:/artifacts:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  artifacts:
+    build:
+      context: ../agent
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/build-artifacts", "watch"]
+    depends_on:
+      core:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      SIGNING_KEY: /keys/core-signing.key
+      ARTIFACT_DIR: /artifacts
+      TARGETS: all
+      AGENT_SRC: /app
+    volumes:
+      - keys:/keys:ro
+      - ${AUTOSECRETS_ARTIFACT_DIR:-artifacts}:/artifacts
 
   web:
     build:
       context: ../web
     restart: unless-stopped
     depends_on:
-      - core
+      core:
+        condition: service_healthy
     ports:
       - "${AUTOSECRETS_PORT:-18008}:80"
     environment:
@@ -72,3 +96,4 @@ services:
 volumes:
   postgres_data:
   keys:
+  artifacts:

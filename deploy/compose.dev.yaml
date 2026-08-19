@@ -54,6 +54,24 @@ services:
       timeout: 3s
       retries: 20
 
+  artifacts:
+    build:
+      context: ../agent
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/build-artifacts", "watch"]
+    depends_on:
+      core:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      SIGNING_KEY: /keys/core-signing.key
+      ARTIFACT_DIR: /artifacts
+      TARGETS: all
+      AGENT_SRC: /app
+    volumes:
+      - keys_dev:/keys:ro
+      - artifacts_dev:/artifacts
+
   web:
     build:
       context: ../web

@@ -83,6 +83,8 @@ Open `http://<host>:18008`. Set `AUTOSECRETS_PUBLIC_URL` to the URL you actually
 
 `AUTOSECRETS_DB_PASSWORD` is applied only when the Postgres volume is first created. Changing it later does not update the existing role; Core will fail to start until you `ALTER USER` or recreate the volume.
 
+The `artifacts` service waits for Core's signing key, then builds and signs Agent packages for linux, darwin, and windows (amd64 and arm64). Install Command downloads the host's package from `/agent/v1/artifacts/`.
+
 `CORE_CORS_ORIGINS` is unused in this layout. Leave it empty.
 
 Set `SOURCE_COMMIT` if you want the About dialog to show a specific revision. Core writes keys into the `keys` volume; back that volume up separately from the database.

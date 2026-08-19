@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -97,11 +98,18 @@ func (h *Handler) handleCAPEM(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(h.ca.CertPEM())
 }
 
+var artifactNameRe = regexp.MustCompile(
+	`^autosecrets-agent-(linux|darwin|windows)-(amd64|arm64)\.tar\.gz(\.sig)?$`,
+)
+
+func validArtifactName(name string) bool {
+	return artifactNameRe.MatchString(name)
+}
+
 // handleArtifact serves signed Agent artifacts.
 func (h *Handler) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if !strings.HasPrefix(name, "autosecrets-agent-linux-") ||
-		(!strings.HasSuffix(name, ".tar.gz") && !strings.HasSuffix(name, ".tar.gz.sig")) {
+	if !validArtifactName(name) {
 		middleware.WriteError(w, http.StatusNotFound, "not_found", "artifact not found")
 		return
 	}
@@ -210,6 +218,13 @@ case "$ARCH" in
   aarch64|arm64) ART_ARCH="arm64" ;;
   *) echo "unsupported architecture: $ARCH" >&2; exit 2 ;;
 esac
+OS="$(uname -s)"
+case "$OS" in
+  Linux) ART_OS="linux" ;;
+  Darwin) ART_OS="darwin" ;;
+  MINGW*|MSYS*|CYGWIN*) ART_OS="windows" ;;
+  *) echo "unsupported operating system: $OS" >&2; exit 2 ;;
+esac
 
 require_openssl() {
   command -v openssl >/dev/null 2>&1 || { echo "openssl is required to verify the agent artifact" >&2; exit 2; }
@@ -236,8 +251,8 @@ if [ -n "$INSECURE" ]; then
 else
   CURL="curl -fsSL ${AUTOSECRETS_CURL_OPTS:-}"
 fi
-$CURL "$SERVER%[1]s/artifacts/autosecrets-agent-linux-$ART_ARCH.tar.gz" -o "$TMP/agent.tar.gz"
-$CURL "$SERVER%[2]s/artifacts/autosecrets-agent-linux-$ART_ARCH.tar.gz.sig" -o "$TMP/agent.tar.gz.sig"
+$CURL "$SERVER%[1]s/artifacts/autosecrets-agent-$ART_OS-$ART_ARCH.tar.gz" -o "$TMP/agent.tar.gz"
+$CURL "$SERVER%[2]s/artifacts/autosecrets-agent-$ART_OS-$ART_ARCH.tar.gz.sig" -o "$TMP/agent.tar.gz.sig"
 verify_artifact "$TMP/agent.tar.gz" "$TMP/agent.tar.gz.sig"
 
 echo "==> Installing to $PREFIX"
