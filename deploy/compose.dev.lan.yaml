@@ -1,0 +1,6 @@
+# Overlay for scripts/dev-up.sh --lan.
+# Publishes the Agent mTLS proxy so other machines can enroll.
+services:
+  agent-proxy:
+    ports:
+      - "0.0.0.0:18443:18443"

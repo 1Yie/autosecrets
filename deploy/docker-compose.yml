@@ -5,6 +5,7 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
+      TZ: Asia/Shanghai
       POSTGRES_DB: autosecrets
       POSTGRES_USER: autosecrets
       POSTGRES_PASSWORD: ${AUTOSECRETS_DB_PASSWORD:?set AUTOSECRETS_DB_PASSWORD}
@@ -25,9 +26,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "${CORE_HOST_PORT:-18080}:8080"
     environment:
+      TZ: Asia/Shanghai
       CORE_LISTEN_ADDR: ":8080"
       CORE_TRUSTED_PROXY_CIDRS: ${CORE_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       CORE_PROXY_CERT_HEADER: "X-Autosecrets-Client-Cert"
@@ -36,8 +36,10 @@ services:
         host=postgres port=5432 dbname=autosecrets
         user=autosecrets
         password=${AUTOSECRETS_DB_PASSWORD}
-      CORE_PUBLIC_AGENT_URL: ${CORE_PUBLIC_AGENT_URL:-}
-      CORE_PUBLIC_URL: ${CORE_PUBLIC_URL:-}
+      CORE_PUBLIC_URL: >-
+        ${CORE_PUBLIC_URL:-${AUTOSECRETS_PUBLIC_URL:-}}
+      CORE_PUBLIC_AGENT_URL: >-
+        ${CORE_PUBLIC_AGENT_URL:-${AUTOSECRETS_PUBLIC_URL:-}}
       CORE_CORS_ORIGINS: ${CORE_CORS_ORIGINS:-}
       CORE_OIDC_ISSUER_URL: ${CORE_OIDC_ISSUER_URL:-}
       CORE_OIDC_CLIENT_ID: ${CORE_OIDC_CLIENT_ID:-}
@@ -57,11 +59,13 @@ services:
   web:
     build:
       context: ../web
-      args:
-        VITE_API_BASE: ${VITE_API_BASE:-}
     restart: unless-stopped
+    depends_on:
+      - core
     ports:
-      - "${WEB_HOST_PORT:-18081}:80"
+      - "${AUTOSECRETS_PORT:-18008}:80"
+    environment:
+      TZ: Asia/Shanghai
 
 volumes:
   postgres_data:

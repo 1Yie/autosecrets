@@ -13,9 +13,11 @@ Repository: [github.com/1Yie/autosecrets](https://github.com/1Yie/autosecrets)
 ```text
  Administrator
       |
-      |  browser
+      |  browser  http://host:18008
       v
      Web  ---- /api/v1 ---->  Core (Go)
+      |                         |
+      +------ /agent/v1 --------+
                                 |
                      PostgreSQL + keys volume
                                 ^
@@ -46,7 +48,7 @@ Master key material stays on disk outside PostgreSQL (`CORE_KEYS_DIR`).
 
 ## Quick start (development)
 
-Requires Docker, Go 1.24+, and [Bun](https://bun.sh).
+Requires Docker.
 
 ```bash
 git clone https://github.com/1Yie/autosecrets.git
@@ -54,13 +56,11 @@ cd autosecrets
 ./scripts/dev-up.sh
 ```
 
-This starts:
+`scripts/dev-up.sh` starts `deploy/compose.dev.yaml`: PostgreSQL, Core, Web, the Agent mTLS proxy, and a local Agent. The only address you open is:
 
-- PostgreSQL on `localhost:55434`
-- Core on `http://127.0.0.1:18080`
-- Web on `http://127.0.0.1:5199`
+- `http://127.0.0.1:18008`
 
-First boot prints a one-time Bootstrap Code in `.dev/core.log`. Open the Web URL, redeem the code, and create the Administrator.
+First boot prints a one-time Bootstrap Code in the Core logs (`docker compose -f deploy/compose.dev.yaml logs core`). Open that URL, redeem the code, and create the Administrator. The local Agent waits until you enroll it (`AGENT_ENROLL_TOKEN=... ./scripts/dev-up.sh`).
 
 ```bash
 ./scripts/dev-down.sh
@@ -70,25 +70,18 @@ First boot prints a one-time Bootstrap Code in `.dev/core.log`. Open the Web URL
 
 ## Deploy with Compose
 
-The supported install is the Compose bundle in `deploy/`: Core, PostgreSQL, and Web.
+The supported install is the Compose bundle in `deploy/`: PostgreSQL, Core, and Web. Only port `18008` is published. The console, `/api/v1`, and `/agent/v1` share that address.
 
 ```bash
 cd deploy
 export AUTOSECRETS_DB_PASSWORD='a-long-random-password'
-export CORE_PUBLIC_URL='https://autosecrets.example'
-export CORE_PUBLIC_AGENT_URL='https://agent.autosecrets.example'
-export VITE_API_BASE='https://autosecrets.example'
+export AUTOSECRETS_PUBLIC_URL='http://127.0.0.1:18008'
 docker compose up -d --build
 ```
 
-When the console origin differs from Core (for example `:18081` talking to `:18080`), set both:
+Open `http://<host>:18008`. Set `AUTOSECRETS_PUBLIC_URL` to the URL you actually open (needed for OIDC/OAuth callbacks and the Agent Install Command). Change the published port with `AUTOSECRETS_PORT`.
 
-```bash
-export VITE_API_BASE='http://154.222.24.116:18080'
-export CORE_CORS_ORIGINS='http://154.222.24.116:18081'
-```
-
-`CORE_CORS_ORIGINS` is a comma-separated list of canonical origins. Leave it empty when a reverse proxy keeps the console and API same-origin.
+`CORE_CORS_ORIGINS` is unused in this layout. Leave it empty.
 
 Set `SOURCE_COMMIT` if you want the About dialog to show a specific revision. Core writes keys into the `keys` volume; back that volume up separately from the database.
 

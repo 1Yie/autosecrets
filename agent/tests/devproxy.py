@@ -11,9 +11,18 @@ import http.client
 import ipaddress
 import json
 import ssl
+import tempfile
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import cast
+
+from cryptography.hazmat.primitives.asymmetric.types import (
+    CertificateIssuerPrivateKeyTypes,
+    CertificateIssuerPublicKeyTypes,
+)
 
 SERIAL_HEADER = "X-Autosecrets-Client-Cert"
 FORWARD_HEADERS = ("Content-Type", "X-Correlation-ID")
@@ -34,6 +43,8 @@ def build_server_context(
 
     ca = x509.load_pem_x509_certificate(ca_cert.read_bytes())
     ca_key_obj = serialization.load_pem_private_key(ca_key.read_bytes(), password=None)
+    issuer_key = cast(CertificateIssuerPrivateKeyTypes, ca_key_obj)
+    issuer_pub = cast(CertificateIssuerPublicKeyTypes, issuer_key.public_key())
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, hostname)])
     now = datetime.datetime.now(datetime.UTC)
@@ -50,32 +61,29 @@ def build_server_context(
         .not_valid_after(now + datetime.timedelta(days=1))
         .add_extension(x509.SubjectAlternativeName(san), critical=False)
         .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key_obj.public_key()),
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_pub),
             critical=False,
         )
-        .sign(ca_key_obj, hashes.SHA256())
+        .sign(issuer_key, hashes.SHA256())
     )
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    import tempfile
-
-    cert_file = tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False)
-    cert_file.write(cert.public_bytes(serialization.Encoding.PEM).decode())
-    cert_file.close()
-    key_file = tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False)
-    key_file.write(
-        key.private_bytes(
-            serialization.Encoding.PEM,
-            serialization.PrivateFormat.PKCS8,
-            serialization.NoEncryption(),
-        ).decode()
-    )
-    key_file.close()
-    ctx.load_cert_chain(certfile=cert_file.name, keyfile=key_file.name)
+    with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as cert_file:
+        cert_file.write(cert.public_bytes(serialization.Encoding.PEM).decode())
+        cert_path = cert_file.name
+    with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as key_file:
+        key_file.write(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ).decode()
+        )
+        key_path = key_file.name
+    ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
     ctx.load_verify_locations(cafile=str(ca_cert))
     # Client certificates are verified manually per-path (pre-certificate
     # routes must work without one), mirroring the Caddy handle blocks.
     ctx.verify_mode = ssl.CERT_OPTIONAL
-    ctx.ca_cert_file = str(ca_cert)
     return ctx
 
 
@@ -141,8 +149,8 @@ def make_proxy_handler(
 
         do_GET = do_POST = do_PUT = do_DELETE = _forward
 
-        def log_message(self, fmt, *args):  # silence
-            pass
+        def log_message(self, format: str, *args: object) -> None:
+            return
 
     return ProxyHandler
 
@@ -184,8 +192,6 @@ def http_json(
     cookies: str = "",
     headers: dict | None = None,
 ) -> tuple[int, dict, dict[str, str]]:
-    import urllib.request
-
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         url,
@@ -208,3 +214,45 @@ def http_json(
             return e.code, json.loads(raw), dict(e.headers.items())
         except json.JSONDecodeError:
             return e.code, {}, dict(e.headers.items())
+
+
+def main() -> int:
+    import os
+    import sys
+    import time
+
+    ca_cert = Path(os.environ.get("AGENT_CA_CERT", "/keys/agent-ca.crt"))
+    ca_key = Path(os.environ.get("AGENT_CA_KEY", "/keys/agent-ca.key"))
+    for path in (ca_cert, ca_key):
+        for _ in range(60):
+            if path.is_file():
+                break
+            time.sleep(1)
+        else:
+            print(f"timed out waiting for {path}", file=sys.stderr)
+            return 1
+    extra_ips = tuple(
+        ip for ip in os.environ.get("AGENT_PROXY_SAN_IPS", "").split(",") if ip
+    )
+    try:
+        port = int(os.environ.get("AGENT_PROXY_PORT", "18443"))
+    except ValueError:
+        print("AGENT_PROXY_PORT must be an integer", file=sys.stderr)
+        return 2
+    proxy = DevProxy(
+        os.environ.get("CORE_UPSTREAM", "core:8080"),
+        ca_cert,
+        ca_key,
+        port=port,
+        bind=os.environ.get("AGENT_PROXY_BIND", "0.0.0.0"),
+        hostname=os.environ.get("AGENT_PROXY_HOSTNAME", "agent-proxy"),
+        san_ips=extra_ips,
+    )
+    proxy.start()
+    print(f"agent-proxy listening on port {port}", flush=True)
+    while True:
+        time.sleep(10)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

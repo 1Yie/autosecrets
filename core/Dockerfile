@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
 	-o /out/autosecrets-core ./cmd/autosecrets-core
 
 FROM alpine:3.20
-RUN apk add --no-cache su-exec \
+RUN apk add --no-cache su-exec wget \
 	&& addgroup -S autosecrets \
 	&& adduser -S -G autosecrets autosecrets \
 	&& mkdir -p /keys \
