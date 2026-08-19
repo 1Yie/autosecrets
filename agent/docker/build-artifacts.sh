@@ -102,6 +102,24 @@ artifact_ok() {
 	openssl pkeyutl -verify -rawin -pubin -inkey "$PUB" -sigfile "$art.sig" -in "$art" >/dev/null 2>&1
 }
 
+# Content fingerprint of the packaged agent. Existing tarballs stay "up to
+# date" across image rebuilds unless this changes, which is why a Core
+# update could ship a new identity check with yesterday's Agent package.
+source_hash() {
+	tar -C "$AGENT_SRC" -cf - src pyproject.toml 2>/dev/null | sha256sum | awk '{print $1}'
+}
+
+invalidate_stale_artifacts() {
+	current="$(source_hash)"
+	stamp="$OUT/.src-hash"
+	if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$current" ]; then
+		return 0
+	fi
+	echo "agent source changed; rebuilding artifacts"
+	rm -f "$OUT"/autosecrets-agent-*.tar.gz "$OUT"/autosecrets-agent-*.tar.gz.sig
+	printf '%s\n' "$current" >"$stamp"
+}
+
 download_wheels() {
 	dest="$1"
 	shift
@@ -160,6 +178,7 @@ build_one() {
 
 build_targets() {
 	mkdir -p "$OUT"
+	invalidate_stale_artifacts
 	PUB="$(mktemp)"
 	openssl pkey -in "$KEY" -pubout -out "$PUB"
 	if [ "$TARGET" = all ]; then
@@ -178,14 +197,17 @@ wait_for_key
 build_targets
 
 if [ "$WATCH" = 1 ]; then
-	echo "watching $KEY for changes"
-	last="$(stat -c %Y "$KEY" 2>/dev/null || stat -f %m "$KEY")"
+	echo "watching $KEY and agent source for changes"
+	last_key="$(stat -c %Y "$KEY" 2>/dev/null || stat -f %m "$KEY")"
+	last_src="$(source_hash)"
 	while true; do
 		sleep 30
-		now="$(stat -c %Y "$KEY" 2>/dev/null || stat -f %m "$KEY")"
-		if [ "$now" != "$last" ]; then
-			echo "signing key changed; rebuilding"
-			last="$now"
+		now_key="$(stat -c %Y "$KEY" 2>/dev/null || stat -f %m "$KEY")"
+		now_src="$(source_hash)"
+		if [ "$now_key" != "$last_key" ] || [ "$now_src" != "$last_src" ]; then
+			echo "signing key or agent source changed; rebuilding"
+			last_key="$now_key"
+			last_src="$now_src"
 			build_targets
 		fi
 	done
