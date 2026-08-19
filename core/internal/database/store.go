@@ -5,6 +5,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -30,7 +31,7 @@ func Connect(ctx context.Context, dsn string) (*Store, error) {
 	}
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("database: ping: %w", err)
+		return nil, wrapConnectError("ping", err)
 	}
 	s := &Store{pool: pool, q: gen.New(pool)}
 	if err := s.migrate(ctx); err != nil {
@@ -339,4 +340,15 @@ func (s *Store) ListAuditPage(ctx context.Context, f AuditFilter, afterID int64)
 
 func (s *Store) Begin(ctx context.Context) (pgx.Tx, error) {
 	return s.pool.Begin(ctx)
+}
+
+func wrapConnectError(op string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "28P01" {
+		return fmt.Errorf(
+			"database: %s: %w (existing PostgreSQL data keeps the role password from first init; changing AUTOSECRETS_DB_PASSWORD does not update it)",
+			op, err,
+		)
+	}
+	return fmt.Errorf("database: %s: %w", op, err)
 }

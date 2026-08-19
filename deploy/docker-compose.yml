@@ -8,6 +8,8 @@ services:
       TZ: Asia/Shanghai
       POSTGRES_DB: autosecrets
       POSTGRES_USER: autosecrets
+      # Applied only on first volume init. Changing this later does not
+      # update an existing role password.
       POSTGRES_PASSWORD: ${AUTOSECRETS_DB_PASSWORD:?set AUTOSECRETS_DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -34,8 +36,8 @@ services:
       CORE_KEYS_DIR: "/keys"
       CORE_DB_DSN: >-
         host=postgres port=5432 dbname=autosecrets
-        user=autosecrets
-        password=${AUTOSECRETS_DB_PASSWORD}
+        user=autosecrets sslmode=disable
+        password='${AUTOSECRETS_DB_PASSWORD}'
       CORE_PUBLIC_URL: >-
         ${CORE_PUBLIC_URL:-${AUTOSECRETS_PUBLIC_URL:-}}
       CORE_PUBLIC_AGENT_URL: >-
