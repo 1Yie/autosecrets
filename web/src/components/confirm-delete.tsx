@@ -35,11 +35,13 @@ export function ConfirmDelete({
 }: ConfirmDeleteProps) {
 	return (
 		<AlertDialog open={open} onOpenChange={onOpenChange}>
-			<AlertDialogTrigger
-				render={<Button variant="destructive-outline" size="sm" />}
-			>
-				{label}
-			</AlertDialogTrigger>
+			{label ? (
+				<AlertDialogTrigger
+					render={<Button variant="destructive-outline" size="sm" />}
+				>
+					{label}
+				</AlertDialogTrigger>
+			) : null}
 			<AlertDialogPopup>
 				<AlertDialogHeader>
 					<AlertDialogTitle>{title}</AlertDialogTitle>

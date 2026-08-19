@@ -64,6 +64,14 @@ describe("AppPage environment switcher", () => {
 		expect(await screen.findByText("草稿没有需要发布的变更")).toBeVisible();
 	});
 
+	it("does not render a stray confirm-delete trigger on the page", async () => {
+		renderPage();
+		await screen.findByTestId("env-production");
+		expect(
+			document.querySelector('[data-slot="alert-dialog-trigger"]'),
+		).toBeNull();
+	});
+
 	it("hides delete behind the environment more menu", async () => {
 		const user = userEvent.setup();
 		renderPage();
